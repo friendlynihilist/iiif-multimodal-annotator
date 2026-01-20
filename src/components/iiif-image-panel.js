@@ -50,6 +50,13 @@ export class IIIFImagePanel extends HTMLElement {
           display: block;
           height: 100%;
           position: relative;
+          font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+          --color-black: #000000;
+          --color-white: #ffffff;
+          --color-gray-200: #e5e5e5;
+          --color-gray-300: #d4d4d4;
+          --color-gray-700: #404040;
+          --spacing-unit: 8px;
         }
 
         .container {
@@ -59,10 +66,10 @@ export class IIIFImagePanel extends HTMLElement {
         }
 
         .controls {
-          padding: 1rem;
-          border-bottom: 1px solid #e0e0e0;
+          padding: calc(var(--spacing-unit) * 1.5);
+          border-bottom: 1px solid var(--color-gray-200);
           display: flex;
-          gap: 0.5rem;
+          gap: calc(var(--spacing-unit) * 1);
           align-items: center;
           flex-wrap: wrap;
         }
@@ -70,28 +77,31 @@ export class IIIFImagePanel extends HTMLElement {
         input {
           flex: 1;
           min-width: 200px;
-          padding: 0.4rem;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-          font-size: 0.9rem;
+          padding: calc(var(--spacing-unit) * 0.75);
+          border: 1px solid var(--color-gray-200);
+          border-radius: 0;
+          font-size: 0.8rem;
         }
 
         button {
-          padding: 0.4rem 0.8rem;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-          background: white;
+          padding: calc(var(--spacing-unit) * 0.75) calc(var(--spacing-unit) * 1.25);
+          border: 1px solid var(--color-gray-200);
+          border-radius: 0;
+          background: var(--color-white);
           cursor: pointer;
-          font-size: 0.9rem;
+          font-size: 0.75rem;
+          transition: none;
         }
 
         button:hover {
-          background: #f5f5f5;
+          background: var(--color-black);
+          color: var(--color-white);
+          border-color: var(--color-black);
         }
 
         button.active {
           background: #4CAF50;
-          color: white;
+          color: var(--color-white);
           border-color: #4CAF50;
         }
 
@@ -115,6 +125,7 @@ export class IIIFImagePanel extends HTMLElement {
           z-index: 1000;
           cursor: crosshair;
           display: none;
+          overflow: hidden;
         }
 
         #selection-canvas.active {
@@ -133,19 +144,67 @@ export class IIIFImagePanel extends HTMLElement {
           border: 2px solid #388E3C;
           background: rgba(56, 142, 60, 0.3);
           z-index: 1000;
+          cursor: grab;
+          transition: none;
+          pointer-events: auto;
+        }
+
+        .selection-rect.confirmed:hover {
+          border: 3px solid #2E7D32;
+          background: rgba(46, 125, 50, 0.4);
+          box-shadow: none;
+        }
+
+        .selection-rect.confirmed:active {
+          cursor: grabbing;
+        }
+
+        /* Modality colors for image boxes */
+        .selection-rect.confirmed.denotation {
+          border: 2px solid #2196F3;
+          background: rgba(33, 150, 243, 0.3);
+        }
+
+        .selection-rect.confirmed.denotation:hover {
+          border: 3px solid #1976D2;
+          background: rgba(25, 118, 210, 0.4);
+          box-shadow: none;
+        }
+
+        .selection-rect.confirmed.dynamisation {
+          border: 2px solid #FF5722;
+          background: rgba(255, 87, 34, 0.3);
+        }
+
+        .selection-rect.confirmed.dynamisation:hover {
+          border: 3px solid #E64A19;
+          background: rgba(230, 74, 25, 0.4);
+          box-shadow: none;
+        }
+
+        .selection-rect.confirmed.integration {
+          border: 2px solid #9C27B0;
+          background: rgba(156, 39, 176, 0.3);
+        }
+
+        .selection-rect.confirmed.integration:hover {
+          border: 3px solid #7B1FA2;
+          background: rgba(123, 31, 162, 0.4);
+          box-shadow: none;
         }
 
         .info {
-          font-size: 0.85rem;
-          color: #666;
+          font-size: 0.75rem;
+          color: var(--color-gray-700);
           margin-left: auto;
         }
 
         .help {
-          font-size: 0.8rem;
-          color: #999;
-          padding: 0.5rem 1rem;
-          background: #f9f9f9;
+          font-size: 0.75rem;
+          color: var(--color-gray-700);
+          padding: calc(var(--spacing-unit) * 1) calc(var(--spacing-unit) * 1.5);
+          background: var(--color-white);
+          border-bottom: 1px solid var(--color-gray-200);
         }
       </style>
 
@@ -162,7 +221,7 @@ export class IIIFImagePanel extends HTMLElement {
           <span class="info" id="info">No image loaded</span>
         </div>
         <div class="help">
-          💡 Click "Select Region" then drag on the image to select an area
+          Click "Select Region" then drag on the image to select an area
         </div>
         <div class="viewer-container">
           <div id="openseadragon"></div>
@@ -260,9 +319,16 @@ export class IIIFImagePanel extends HTMLElement {
 
     const rect = e.currentTarget.getBoundingClientRect();
     this.isSelecting = true;
+
+    // Clamp start point to stay within canvas bounds
+    let startX = e.clientX - rect.left;
+    let startY = e.clientY - rect.top;
+    startX = Math.max(0, Math.min(startX, rect.width));
+    startY = Math.max(0, Math.min(startY, rect.height));
+
     this.startPoint = {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
+      x: startX,
+      y: startY
     };
 
     // Remove only the current (non-confirmed) selection rectangle
@@ -273,9 +339,16 @@ export class IIIFImagePanel extends HTMLElement {
     if (!this.isDrawing || !this.isSelecting || !this.startPoint) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
+
+    // Clamp current point to stay within canvas bounds
+    let currentX = e.clientX - rect.left;
+    let currentY = e.clientY - rect.top;
+    currentX = Math.max(0, Math.min(currentX, rect.width));
+    currentY = Math.max(0, Math.min(currentY, rect.height));
+
     const currentPoint = {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
+      x: currentX,
+      y: currentY
     };
 
     // Calculate rectangle
@@ -291,9 +364,16 @@ export class IIIFImagePanel extends HTMLElement {
     if (!this.isDrawing || !this.isSelecting || !this.startPoint) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
+
+    // Clamp end point to stay within canvas bounds
+    let endX = e.clientX - rect.left;
+    let endY = e.clientY - rect.top;
+    endX = Math.max(0, Math.min(endX, rect.width));
+    endY = Math.max(0, Math.min(endY, rect.height));
+
     const endPoint = {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
+      x: endX,
+      y: endY
     };
 
     // Calculate final rectangle in pixel coordinates

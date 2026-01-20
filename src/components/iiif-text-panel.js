@@ -45,6 +45,12 @@ export class IIIFTextPanel extends HTMLElement {
         :host {
           display: block;
           height: 100%;
+          font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+          --color-black: #000000;
+          --color-white: #ffffff;
+          --color-gray-200: #e5e5e5;
+          --color-gray-700: #404040;
+          --spacing-unit: 8px;
         }
 
         .container {
@@ -54,36 +60,42 @@ export class IIIFTextPanel extends HTMLElement {
         }
 
         .controls {
-          padding: 1rem;
-          border-bottom: 1px solid #e0e0e0;
+          padding: calc(var(--spacing-unit) * 1.5);
+          border-bottom: 1px solid var(--color-gray-200);
           display: flex;
-          gap: 0.5rem;
+          gap: calc(var(--spacing-unit) * 1);
           align-items: center;
+          flex-wrap: wrap;
         }
 
         input[type="file"] {
-          font-size: 0.9rem;
+          font-size: 0.8rem;
+          flex-shrink: 1;
+          min-width: 100px;
+          border: 1px solid var(--color-gray-200);
+          border-radius: 0;
+          padding: calc(var(--spacing-unit) * 0.5);
         }
 
         .text-area {
           flex: 1;
-          padding: 2rem;
+          padding: calc(var(--spacing-unit) * 3);
           overflow-y: auto;
-          line-height: 1.8;
-          font-size: 1rem;
+          line-height: 1.6;
+          font-size: 0.95rem;
           user-select: text;
         }
 
         .text-area::selection {
-          background: #B3D4FC;
+          background: var(--color-gray-200);
         }
 
         .text-selected {
           background: #FFEB3B;
           cursor: pointer;
-          transition: background 0.3s;
+          transition: none;
           padding: 0.1rem 0.2rem;
-          border-radius: 2px;
+          border-radius: 0;
         }
 
         .text-selected:hover {
@@ -92,28 +104,68 @@ export class IIIFTextPanel extends HTMLElement {
 
         .text-confirmed {
           background: #81C784;
-          color: white;
-          cursor: pointer;
-          transition: background 0.3s;
+          color: var(--color-white);
+          cursor: grab;
+          transition: none;
           padding: 0.1rem 0.2rem;
-          border-radius: 2px;
+          border-radius: 0;
+          box-shadow: none;
         }
 
         .text-confirmed:hover {
           background: #66BB6A;
+          box-shadow: none;
+          transform: none;
+        }
+
+        .text-confirmed:active {
+          cursor: grabbing;
+        }
+
+        /* Modality colors for text boxes */
+        .text-confirmed.denotation {
+          background: #2196F3;
+        }
+
+        .text-confirmed.denotation:hover {
+          background: #1976D2;
+          box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.3);
+        }
+
+        .text-confirmed.dynamisation {
+          background: #FF5722;
+        }
+
+        .text-confirmed.dynamisation:hover {
+          background: #E64A19;
+          box-shadow: 0 0 0 3px rgba(255, 87, 34, 0.3);
+        }
+
+        .text-confirmed.integration {
+          background: #9C27B0;
+        }
+
+        .text-confirmed.integration:hover {
+          background: #7B1FA2;
+          box-shadow: 0 0 0 3px rgba(156, 39, 176, 0.3);
         }
 
         button {
-          padding: 0.4rem 0.8rem;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-          background: white;
+          padding: calc(var(--spacing-unit) * 0.75) calc(var(--spacing-unit) * 1.25);
+          border: 1px solid var(--color-gray-200);
+          border-radius: 0;
+          background: var(--color-white);
           cursor: pointer;
-          font-size: 0.9rem;
+          font-size: 0.75rem;
+          white-space: nowrap;
+          flex-shrink: 0;
+          transition: none;
         }
 
         button:hover:not(:disabled) {
-          background: #f5f5f5;
+          background: var(--color-black);
+          color: var(--color-white);
+          border-color: var(--color-black);
         }
 
         button:disabled {
@@ -122,18 +174,21 @@ export class IIIFTextPanel extends HTMLElement {
         }
 
         #confirm-selection-btn:not(:disabled) {
-          background: #FFF9C4;
-          border-color: #FBC02D;
+          background: #FFEB3B;
+          border-color: #FFEB3B;
         }
 
         #confirm-selection-btn:not(:disabled):hover {
-          background: #FFF59D;
+          background: #FDD835;
+          border-color: #FDD835;
         }
 
         .info {
-          font-size: 0.85rem;
-          color: #666;
-          margin-left: auto;
+          font-size: 0.7rem;
+          color: var(--color-gray-700);
+          width: 100%;
+          flex-basis: 100%;
+          margin-top: calc(var(--spacing-unit) * 0.5);
         }
       </style>
 
@@ -288,12 +343,19 @@ export class IIIFTextPanel extends HTMLElement {
       selection: this.currentSelection
     });
 
-    // Dispatch event to parent annotator (now the selection is confirmed)
-    this.dispatchEvent(new CustomEvent('text-selected', {
-      detail: this.currentSelection,
+    // Dispatch event to parent annotator with element reference
+    this.dispatchEvent(new CustomEvent('text-confirmed', {
+      detail: {
+        element: this.currentSelectionElement,
+        selection: this.currentSelection
+      },
       bubbles: true,
       composed: true
     }));
+
+    // Store for later reference
+    const savedSelection = this.currentSelection;
+    const savedElement = this.currentSelectionElement;
 
     // Reset current selection (ready for next annotation)
     this.currentSelection = null;
@@ -303,7 +365,7 @@ export class IIIFTextPanel extends HTMLElement {
     const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
     confirmBtn.disabled = true;
 
-    this.updateInfo(`Confirmed (green) - Ready for next selection`);
+    this.updateInfo(`Confirmed (green) - Ready to link or select next`);
   }
 
   clearSelection() {

@@ -16,124 +16,17 @@
       background: #f5f5f5;
     }
 
-    header {
-      background: white;
-      padding: 1.5rem 2rem;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      margin-bottom: 1rem;
-    }
-
-    h1 {
-      font-size: 1.5rem;
-      color: #333;
-      margin-bottom: 0.5rem;
-    }
-
-    .subtitle {
-      color: #666;
-      font-size: 0.9rem;
-    }
-
     main {
-      height: calc(100vh - 120px);
-    }
-
-    footer {
-      background: white;
-      padding: 1rem 2rem;
-      text-align: center;
-      font-size: 0.85rem;
-      color: #666;
-      border-top: 1px solid #e0e0e0;
-    }
-
-    footer a {
-      color: #2196F3;
-      text-decoration: none;
-    }
-
-    footer a:hover {
-      text-decoration: underline;
-    }
-
-    .example-links {
-      margin-top: 1rem;
-      padding: 1rem;
-      background: #f9f9f9;
-      border-radius: 4px;
-    }
-
-    .example-links h3 {
-      font-size: 0.9rem;
-      margin-bottom: 0.5rem;
-      color: #555;
-    }
-
-    .example-links ul {
-      list-style: none;
-      font-size: 0.85rem;
-    }
-
-    .example-links li {
-      margin: 0.25rem 0;
-    }
-
-    .example-links code {
-      background: white;
-      padding: 0.2rem 0.4rem;
-      border-radius: 3px;
-      font-size: 0.8rem;
-      color: #d32f2f;
+      height: 100vh;
+      width: 100vw;
     }
   </style>
 </head>
 <body>
-  <header>
-    <h1>🖼️ IIIF INTERIM Annotator</h1>
-    <p class="subtitle">Semantic annotation tool for intermedial phenomena using IIIF and Web Annotations</p>
-
-    <div class="example-links">
-      <h3>📚 Try these example IIIF manifests:</h3>
-      <ul>
-        <li>• British Library: <code>https://api.bl.uk/metadata/iiif/ark:/81055/vdc_100022589322.0x000001/manifest.json</code></li>
-        <li>• Stanford: <code>https://purl.stanford.edu/hs631zg4177/iiif/manifest</code></li>
-        <li>• Bodleian: <code>https://iiif.bodleian.ox.ac.uk/iiif/manifest/e32a277e-91e2-4a6d-8ba6-cc4bad230410.json</code></li>
-      </ul>
-    </div>
-  </header>
-
   <main>
-    <!-- Main annotator component -->
-    <iiif-interim-annotator id="annotator">
-      <!-- Pre-loaded text and image for demo -->
-      <iiif-text-panel slot="text-panel" src="./sample-text.txt"></iiif-text-panel>
-      <iiif-image-panel slot="image-panel" tileSources="https://iiif.bodleian.ox.ac.uk/iiif/image/b5994701-fcda-4d33-b0a1-ca82c2c9e70b"></iiif-image-panel>
-    </iiif-interim-annotator>
+    <iiif-interim-annotator id="annotator"></iiif-interim-annotator>
   </main>
 
-  <footer>
-    Based on the <a href="https://w3id.org/interim/" target="_blank">INTERIM Ontology</a> for intermedial relations |
-    <a href="https://github.com/friendlynihilist/iiif-interim-annotator" target="_blank">View on GitHub</a>
-  </footer>
-
-  <!-- Import the annotator module -->
   <script type="module" src="../src/index.js"></script>
-
-  <!-- Example: Programmatic usage -->
-  <script type="module">
-    // Access the annotator instance
-    const annotator = document.getElementById('annotator');
-
-    // Listen for annotation events
-    annotator.addEventListener('annotation-created', (event) => {
-      console.log('New annotation created:', event.detail);
-    });
-
-    // Example: Load annotations programmatically
-    // annotator.loadAnnotations([...]);
-
-    // Example: Get all annotations
-    // const annotations = annotator.getAnnotations();
-  </script>
 </body>
 </html>
