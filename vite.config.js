@@ -1,21 +1,18 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'path';
 
 export default defineConfig({
+  root: 'examples',
   build: {
-    lib: {
-      entry: 'src/index.js',
-      name: 'IIIFInterimAnnotator',
-      fileName: 'iiif-interim-annotator',
-      formats: ['es', 'umd']
-    },
+    outDir: '../dist',
+    emptyOutDir: true,
     rollupOptions: {
-      external: [],
-      output: {
-        globals: {}
+      input: {
+        main: resolve(__dirname, 'examples/index.html')
       }
     }
   },
   server: {
-    open: '/examples/index.html'
+    open: '/index.html'
   }
 });
