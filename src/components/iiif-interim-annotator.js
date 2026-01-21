@@ -16,6 +16,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
     this.unlinkedImageRects = []; // Image rects not yet linked
     this.panels = []; // Dynamic panel configuration
     this.panelIdCounter = 0;
+    this.connectionIndicators = new Map(); // Track indicator circles for off-screen connections
   }
 
   connectedCallback() {
@@ -260,6 +261,8 @@ export class IIIFInterimAnnotator extends HTMLElement {
           flex-direction: column;
           min-width: 320px;
           max-height: 100%;
+          position: relative;
+          z-index: 1;
         }
 
         .panel:last-child {
@@ -410,7 +413,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
           width: 100%;
           height: 100%;
           pointer-events: none;
-          z-index: 9999;
+          z-index: 10000;
           overflow: visible;
         }
 
@@ -474,6 +477,38 @@ export class IIIFInterimAnnotator extends HTMLElement {
           stroke: var(--color-white);
           stroke-width: 2px;
           will-change: transform;
+        }
+
+        /* Connection indicators for off-screen connections */
+        .connection-indicator {
+          cursor: pointer;
+          pointer-events: all;
+          transition: opacity 0.3s ease;
+        }
+
+        .connection-indicator.denotation {
+          fill: #2196F3;
+        }
+
+        .connection-indicator.dynamisation {
+          fill: #FF5722;
+        }
+
+        .connection-indicator.integration {
+          fill: #9C27B0;
+        }
+
+        .connection-indicator.transcription {
+          fill: #4CAF50;
+        }
+
+        .indicator-count {
+          fill: var(--color-white);
+          font-size: 10px;
+          font-weight: 600;
+          text-anchor: middle;
+          dominant-baseline: central;
+          pointer-events: none;
         }
 
         .modality-selector {
@@ -1000,7 +1035,8 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
         if (sourcePanel && typeof sourcePanel.confirmCurrentRect === 'function') {
           sourcePanel.confirmCurrentRect();
-          const allConfirmedRects = sourcePanel.shadowRoot?.querySelectorAll('.selection-rect.confirmed');
+          // Get both rectangle divs and SVG paths that are confirmed
+          const allConfirmedRects = sourcePanel.shadowRoot?.querySelectorAll('.selection-rect.confirmed, svg.confirmed');
           if (allConfirmedRects && allConfirmedRects.length > 0) {
             const rect = allConfirmedRects[allConfirmedRects.length - 1];
             this.unlinkedImageRects.push({
@@ -1114,7 +1150,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
   }
 
   updateConnectionLine(connection, index) {
-    const { textElement, imageRect, path, label } = connection;
+    const { textElement, imageRect, path, label, modality } = connection;
 
     // Check if elements still exist
     if (!textElement || !imageRect || !path) return;
@@ -1129,6 +1165,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
     if (!textVisible || !imageVisible) {
       path.style.display = 'none';
       if (label) label.style.display = 'none';
+      this.hideIndicator(connection);
       return;
     }
 
@@ -1143,9 +1180,53 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     // Get element bounds
     const textBounds = textElement.getBoundingClientRect();
-    const imageBounds = imageRect.getBoundingClientRect();
 
-    // Calculate coordinates relative to container (SVG is position:absolute)
+    // For SVG elements, get the bounding box of the path, not the SVG container
+    let imageBounds;
+    if (imageRect.tagName && imageRect.tagName.toLowerCase() === 'svg') {
+      const pathElement = imageRect.querySelector('path');
+      if (pathElement) {
+        // Get the tight bounding box of the path
+        const bbox = pathElement.getBBox();
+        const svgRect = imageRect.getBoundingClientRect();
+        // Convert bbox to screen coordinates
+        imageBounds = {
+          left: svgRect.left + bbox.x,
+          right: svgRect.left + bbox.x + bbox.width,
+          top: svgRect.top + bbox.y,
+          bottom: svgRect.top + bbox.y + bbox.height,
+          width: bbox.width,
+          height: bbox.height
+        };
+      } else {
+        imageBounds = imageRect.getBoundingClientRect();
+      }
+    } else {
+      imageBounds = imageRect.getBoundingClientRect();
+    }
+
+    // Get text area container to check if text element is in viewport
+    // textElement is inside the shadow DOM of the text panel
+    const shadowRoot = textElement.getRootNode();
+    let textInViewport = true;
+    const fadeThreshold = 80; // pixels from edge before starting fade
+
+    if (shadowRoot && shadowRoot.querySelector) {
+      const textArea = shadowRoot.querySelector('.text-area');
+      if (textArea) {
+        const textAreaBounds = textArea.getBoundingClientRect();
+        const textTop = textBounds.top;
+        const textBottom = textBounds.bottom;
+
+        // Check if text is outside the visible viewport of the scrollable area
+        if (textBottom < textAreaBounds.top + fadeThreshold ||
+            textTop > textAreaBounds.bottom - fadeThreshold) {
+          textInViewport = false;
+        }
+      }
+    }
+
+    // Calculate coordinates relative to container
     const startX = textBounds.right - containerBounds.left;
     const startY = textBounds.top - containerBounds.top + textBounds.height / 2;
     const endX = imageBounds.left - containerBounds.left;
@@ -1167,6 +1248,132 @@ export class IIIFInterimAnnotator extends HTMLElement {
       const midY = (startY + endY) / 2;
       label.setAttribute('x', midX);
       label.setAttribute('y', midY - 5);
+    }
+
+    // Handle fade out and indicator
+    if (!textInViewport) {
+      // Fade out the connection
+      path.style.opacity = '0.1';
+      if (label) label.style.opacity = '0';
+
+      // Show indicator circle near the image box
+      this.showIndicator(connection, imageBounds, containerBounds);
+    } else {
+      // Show connection normally
+      path.style.opacity = '1';
+      if (label) label.style.opacity = '1';
+
+      // Hide indicator
+      this.hideIndicator(connection);
+    }
+  }
+
+  showIndicator(connection, imageBounds, containerBounds) {
+    const { imageRect, modality } = connection;
+    const imageRectId = imageRect.id || imageRect.dataset.id;
+
+    if (!imageRectId) return;
+
+    // Create a unique key for grouping indicators by image rect and modality
+    const indicatorKey = `${imageRectId}-${modality}`;
+
+    // Get or create indicator group for this image rect and modality
+    if (!this.connectionIndicators.has(indicatorKey)) {
+      const svg = this.shadowRoot.getElementById('connection-overlay');
+      if (!svg) return;
+
+      // Create indicator circle
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('class', `connection-indicator ${modality}`);
+      circle.setAttribute('r', '8');
+
+      // Create count text
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('class', 'indicator-count');
+
+      svg.appendChild(circle);
+      svg.appendChild(text);
+
+      this.connectionIndicators.set(indicatorKey, {
+        circle,
+        text,
+        connections: new Set(),
+        imageRect,
+        modality
+      });
+    }
+
+    // Add this connection to the indicator group
+    const indicator = this.connectionIndicators.get(indicatorKey);
+    indicator.connections.add(connection);
+
+    // Position the indicator near the right edge of the image box
+    // Stack vertically if multiple modalities for same image
+    const modalityIndex = ['denotation', 'dynamisation', 'integration', 'transcription'].indexOf(modality);
+    const offsetY = modalityIndex * 20; // Stack indicators vertically
+
+    const cx = imageBounds.right - containerBounds.left + 15;
+    const cy = imageBounds.top - containerBounds.top + imageBounds.height / 2 + offsetY;
+
+    indicator.circle.setAttribute('cx', cx);
+    indicator.circle.setAttribute('cy', cy);
+
+    // Update count
+    const count = indicator.connections.size;
+    indicator.text.setAttribute('x', cx);
+    indicator.text.setAttribute('y', cy);
+    indicator.text.textContent = count > 1 ? count : '';
+
+    // Make indicator clickable
+    if (!indicator.circle.hasAttribute('data-listener')) {
+      indicator.circle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.scrollToFirstConnection(indicator);
+      });
+      indicator.circle.setAttribute('data-listener', 'true');
+    }
+  }
+
+  hideIndicator(connection) {
+    const { imageRect, modality } = connection;
+    const imageRectId = imageRect?.id || imageRect?.dataset?.id;
+
+    if (!imageRectId) return;
+
+    const indicatorKey = `${imageRectId}-${modality}`;
+    const indicator = this.connectionIndicators.get(indicatorKey);
+
+    if (!indicator) return;
+
+    // Remove this connection from the indicator group
+    indicator.connections.delete(connection);
+
+    // If no more connections in this group, remove the indicator
+    if (indicator.connections.size === 0) {
+      indicator.circle.remove();
+      indicator.text.remove();
+      this.connectionIndicators.delete(indicatorKey);
+    } else {
+      // Update count
+      const count = indicator.connections.size;
+      indicator.text.textContent = count > 1 ? count : '';
+    }
+  }
+
+  scrollToFirstConnection(indicator) {
+    // Find the first connection in this indicator group
+    const firstConnection = Array.from(indicator.connections)[0];
+    if (!firstConnection || !firstConnection.textElement) return;
+
+    // Scroll the text element into view
+    const textPanel = firstConnection.textElement.closest('iiif-text-panel');
+    if (textPanel && textPanel.shadowRoot) {
+      const textContainer = textPanel.shadowRoot.querySelector('.text-content');
+      if (textContainer) {
+        const elementTop = firstConnection.textElement.offsetTop;
+        textContainer.scrollTop = elementTop - 100; // Scroll with some offset from top
+        this.updateStatus(`Showing ${indicator.modality} connection (${indicator.connections.size} total)`);
+      }
     }
   }
 
@@ -1295,7 +1502,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     for (const item of targetList) {
       const bounds = this.getElementBounds(item.element, targetType);
-      if (this.isPointInBounds(event.clientX, event.clientY, bounds)) {
+      if (this.isPointInBounds(event.clientX, event.clientY, bounds, item.element)) {
         // Calculate distance from mouse to center of element
         const centerX = bounds.left + bounds.width / 2;
         const centerY = bounds.top + bounds.height / 2;
@@ -1335,7 +1542,37 @@ export class IIIFInterimAnnotator extends HTMLElement {
     return element.getBoundingClientRect();
   }
 
-  isPointInBounds(x, y, bounds) {
+  isPointInBounds(x, y, bounds, element) {
+    // For SVG elements, check if point is actually inside the path
+    if (element.tagName && element.tagName.toLowerCase() === 'svg') {
+      const pathElement = element.querySelector('path');
+      if (pathElement) {
+        // Create a point in SVG coordinates
+        const svgRect = element.getBoundingClientRect();
+        const pt = element.createSVGPoint();
+        pt.x = x - svgRect.left;
+        pt.y = y - svgRect.top;
+
+        // Check if point is in the path
+        // Note: isPointInFill and isPointInStroke might not work in all browsers
+        // So we also check a larger bounding area as fallback
+        try {
+          return pathElement.isPointInFill(pt) || pathElement.isPointInStroke(pt);
+        } catch (e) {
+          // Fallback: use path bounding box with some padding
+          const pathBox = pathElement.getBBox();
+          const padding = 10;
+          const localX = pt.x;
+          const localY = pt.y;
+          return localX >= pathBox.x - padding &&
+                 localX <= pathBox.x + pathBox.width + padding &&
+                 localY >= pathBox.y - padding &&
+                 localY <= pathBox.y + pathBox.height + padding;
+        }
+      }
+    }
+
+    // For regular elements (DIV rectangles), use bounding box
     return x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom;
   }
 
@@ -1496,7 +1733,30 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     // Use getBoundingClientRect directly for both elements
     const textBounds = textElement.getBoundingClientRect();
-    const imageBounds = imageRect.getBoundingClientRect();
+
+    // For SVG elements, get the bounding box of the path, not the SVG container
+    let imageBounds;
+    if (imageRect.tagName && imageRect.tagName.toLowerCase() === 'svg') {
+      const pathElement = imageRect.querySelector('path');
+      if (pathElement) {
+        // Get the tight bounding box of the path
+        const bbox = pathElement.getBBox();
+        const svgRect = imageRect.getBoundingClientRect();
+        // Convert bbox to screen coordinates
+        imageBounds = {
+          left: svgRect.left + bbox.x,
+          right: svgRect.left + bbox.x + bbox.width,
+          top: svgRect.top + bbox.y,
+          bottom: svgRect.top + bbox.y + bbox.height,
+          width: bbox.width,
+          height: bbox.height
+        };
+      } else {
+        imageBounds = imageRect.getBoundingClientRect();
+      }
+    } else {
+      imageBounds = imageRect.getBoundingClientRect();
+    }
 
     // Calculate coordinates relative to container
     const startX = textBounds.right - containerBounds.left;

@@ -12,8 +12,11 @@ export class IIIFImagePanel extends HTMLElement {
     this.selectionOverlay = null;
     this.isDrawing = false;
     this.isSelecting = false;
+    this.drawingMode = 'rectangle'; // 'rectangle' or 'freehand'
     this.startPoint = null;
     this.currentRect = null;
+    this.currentPath = []; // Store points for freehand drawing
+    this.pathClosed = false; // Track if freehand path is closed
     this.overlayElement = null;
     this.confirmedRects = []; // Store all confirmed (persistent) rectangles for current canvas
     this.rectsByCanvas = {}; // Store selections by canvas index: { canvasIndex: [rectData, ...] }
@@ -151,7 +154,7 @@ export class IIIFImagePanel extends HTMLElement {
           left: 0;
           width: 100%;
           height: 100%;
-          z-index: 1000;
+          z-index: 100;
           cursor: default;
           pointer-events: none;
           overflow: hidden;
@@ -167,13 +170,13 @@ export class IIIFImagePanel extends HTMLElement {
           border: 2px solid #FFC107;
           background: rgba(255, 193, 7, 0.2);
           pointer-events: none;
-          z-index: 1001;
+          z-index: 101;
         }
 
         .selection-rect.confirmed {
           border: 2px solid #4CAF50;
           background: rgba(76, 175, 80, 0.3);
-          z-index: 1000;
+          z-index: 100;
           cursor: grab;
           transition: none;
           pointer-events: auto;
@@ -224,6 +227,47 @@ export class IIIFImagePanel extends HTMLElement {
         .selection-rect.confirmed.transcription {
           border: 2px solid #4CAF50;
           background: rgba(76, 175, 80, 0.25);
+        }
+
+        /* SVG freehand paths */
+        svg.confirmed {
+          cursor: grab;
+          pointer-events: auto;
+          z-index: 100;
+        }
+
+        svg.confirmed:active {
+          cursor: grabbing;
+        }
+
+        svg.confirmed path {
+          pointer-events: all;
+          transition: stroke-width 0.2s ease;
+        }
+
+        svg.confirmed:hover path {
+          stroke-width: 3;
+        }
+
+        /* Modality colors for SVG paths */
+        svg.confirmed.denotation path {
+          stroke: #2196F3;
+          fill: rgba(33, 150, 243, 0.3);
+        }
+
+        svg.confirmed.dynamisation path {
+          stroke: #FF5722;
+          fill: rgba(255, 87, 34, 0.3);
+        }
+
+        svg.confirmed.integration path {
+          stroke: #9C27B0;
+          fill: rgba(156, 39, 176, 0.3);
+        }
+
+        svg.confirmed.transcription path {
+          stroke: #4CAF50;
+          fill: rgba(76, 175, 80, 0.25);
         }
 
         .info {
@@ -364,6 +408,11 @@ export class IIIFImagePanel extends HTMLElement {
               <path d="M3 3h7M3 3v7M21 3h-7M21 3v7M3 21h7M3 21v-7M21 21h-7M21 21v-7"/>
             </svg>
           </button>
+          <button id="drawing-mode-btn" title="Switch to freehand drawing">
+            <svg viewBox="0 0 24 24">
+              <path d="M20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.84 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/>
+            </svg>
+          </button>
           <button id="clear-selection-btn" title="Clear selection">
             <svg viewBox="0 0 24 24">
               <path d="M18 6L6 18M6 6l12 12"/>
@@ -449,6 +498,7 @@ export class IIIFImagePanel extends HTMLElement {
   setupEventListeners() {
     const loadBtn = this.shadowRoot.getElementById('load-btn');
     const selectBtn = this.shadowRoot.getElementById('select-btn');
+    const drawingModeBtn = this.shadowRoot.getElementById('drawing-mode-btn');
     const clearSelectionBtn = this.shadowRoot.getElementById('clear-selection-btn');
     const manifestInput = this.shadowRoot.getElementById('manifest-input');
     const prevBtn = this.shadowRoot.getElementById('prev-btn');
@@ -472,6 +522,7 @@ export class IIIFImagePanel extends HTMLElement {
     });
 
     selectBtn.addEventListener('click', () => this.toggleSelectionMode());
+    drawingModeBtn.addEventListener('click', () => this.toggleDrawingMode());
     clearSelectionBtn.addEventListener('click', () => this.clearSelection());
 
     // Navigation buttons
@@ -499,12 +550,40 @@ export class IIIFImagePanel extends HTMLElement {
       selectBtn.classList.add('active');
       selectBtn.title = 'Selection active - click to disable';
       selectionCanvas.classList.add('active');
-      this.updateInfo('Click and drag to select a region');
+      const modeText = this.drawingMode === 'rectangle' ? 'rectangle' : 'freehand path';
+      this.updateInfo(`Click and drag to draw ${modeText}`);
     } else {
       selectBtn.classList.remove('active');
       selectBtn.title = 'Select region';
       selectionCanvas.classList.remove('active');
       this.updateInfo('Selection mode disabled');
+    }
+  }
+
+  toggleDrawingMode() {
+    const btn = this.shadowRoot.getElementById('drawing-mode-btn');
+    const selectBtn = this.shadowRoot.getElementById('select-btn');
+    const selectionCanvas = this.shadowRoot.getElementById('selection-canvas');
+
+    if (this.drawingMode === 'freehand') {
+      // Switch back to rectangle
+      this.drawingMode = 'rectangle';
+      this.isDrawing = false;
+      btn.classList.remove('active');
+      selectBtn.classList.remove('active');
+      selectionCanvas.classList.remove('active');
+      btn.title = 'Switch to freehand drawing';
+      this.updateInfo('Rectangle selection mode');
+    } else {
+      // Switch to freehand and activate drawing
+      this.drawingMode = 'freehand';
+      this.isDrawing = true;
+      btn.classList.add('active');
+      selectBtn.classList.add('active');
+      selectionCanvas.classList.add('active');
+      btn.title = 'Disable freehand drawing';
+      selectBtn.title = 'Freehand drawing active';
+      this.updateInfo('Freehand drawing mode - draw on the image');
     }
   }
 
@@ -524,6 +603,12 @@ export class IIIFImagePanel extends HTMLElement {
       x: startX,
       y: startY
     };
+
+    // Initialize path for freehand drawing
+    if (this.drawingMode === 'freehand') {
+      this.currentPath = [{ x: startX, y: startY }];
+      this.pathClosed = false;
+    }
 
     // Remove only the current (non-confirmed) selection rectangle
     this.clearCurrentSelectionRect();
@@ -545,95 +630,175 @@ export class IIIFImagePanel extends HTMLElement {
       y: currentY
     };
 
-    // Calculate rectangle
-    const x = Math.min(this.startPoint.x, currentPoint.x);
-    const y = Math.min(this.startPoint.y, currentPoint.y);
-    const width = Math.abs(currentPoint.x - this.startPoint.x);
-    const height = Math.abs(currentPoint.y - this.startPoint.y);
+    if (this.drawingMode === 'freehand') {
+      // Check if close to starting point for snap
+      const snapDistance = 15; // pixels
+      const distToStart = Math.sqrt(
+        Math.pow(currentPoint.x - this.startPoint.x, 2) +
+        Math.pow(currentPoint.y - this.startPoint.y, 2)
+      );
 
-    this.drawSelectionRect(x, y, width, height);
+      if (distToStart < snapDistance && this.currentPath.length > 10) {
+        // Snap to start point and mark as closed
+        if (!this.pathClosed) {
+          this.currentPath.push(this.startPoint);
+          this.pathClosed = true;
+          this.drawFreehandPath(this.currentPath, true); // true = closed path
+          // Auto-complete the selection on next mouseup
+        }
+      } else if (!this.pathClosed) {
+        // Add point to path only if not already closed
+        this.currentPath.push(currentPoint);
+        this.drawFreehandPath(this.currentPath, false);
+      }
+    } else {
+      // Calculate rectangle
+      const x = Math.min(this.startPoint.x, currentPoint.x);
+      const y = Math.min(this.startPoint.y, currentPoint.y);
+      const width = Math.abs(currentPoint.x - this.startPoint.x);
+      const height = Math.abs(currentPoint.y - this.startPoint.y);
+
+      this.drawSelectionRect(x, y, width, height);
+    }
   }
 
   onMouseUp(e) {
     if (!this.isDrawing || !this.isSelecting || !this.startPoint) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
-
-    // Clamp end point to stay within canvas bounds
-    let endX = e.clientX - rect.left;
-    let endY = e.clientY - rect.top;
-    endX = Math.max(0, Math.min(endX, rect.width));
-    endY = Math.max(0, Math.min(endY, rect.height));
-
-    const endPoint = {
-      x: endX,
-      y: endY
-    };
-
-    // Calculate final rectangle in pixel coordinates
-    const pixelX = Math.min(this.startPoint.x, endPoint.x);
-    const pixelY = Math.min(this.startPoint.y, endPoint.y);
-    const pixelWidth = Math.abs(endPoint.x - this.startPoint.x);
-    const pixelHeight = Math.abs(endPoint.y - this.startPoint.y);
-
-    // Convert to viewport coordinates
-    const viewportRect = this.viewer.viewport.viewerElementToViewportRectangle(
-      new OpenSeadragon.Rect(pixelX, pixelY, pixelWidth, pixelHeight)
-    );
-
-    // Convert to image coordinates
     const imageWidth = this.viewer.world.getItemAt(0)?.source.dimensions?.x || 1000;
     const imageHeight = this.viewer.world.getItemAt(0)?.source.dimensions?.y || 1000;
 
-    const x = Math.round(viewportRect.x * imageWidth);
-    const y = Math.round(viewportRect.y * imageHeight);
-    const w = Math.round(viewportRect.width * imageWidth);
-    const h = Math.round(viewportRect.height * imageHeight);
+    // Get the current canvas (if loaded from manifest)
+    const currentCanvas = this.getCurrentCanvas();
+    const canvasId = currentCanvas ? currentCanvas.id : null;
+    const source = this.viewer.world.getItemAt(0)?.source;
+    const imageUrl = source?.['@id'] || source?.id || this.getAttribute('tileSources') || '';
 
-    // Only create annotation if rectangle has meaningful size
-    if (w > 5 && h > 5) {
-      // Create IIIF fragment selector
-      const selector = {
-        type: 'FragmentSelector',
-        conformsTo: 'http://www.w3.org/TR/media-frags/',
-        value: `xywh=${x},${y},${w},${h}`
-      };
-
-      // Get the current canvas (if loaded from manifest)
-      const currentCanvas = this.getCurrentCanvas();
-      const canvasId = currentCanvas ? currentCanvas.id : null;
-
-      // Get the current image source
-      const source = this.viewer.world.getItemAt(0)?.source;
-      const imageUrl = source?.['@id'] || source?.id || this.getAttribute('tileSources') || '';
-
-      const selectionData = {
-        source: canvasId || imageUrl, // Use canvas ID if available, otherwise image URL
-        canvasId: canvasId,
-        canvasIndex: this.currentCanvasIndex,
-        canvasLabel: currentCanvas ? currentCanvas.label : null,
-        selector: selector,
-        region: { x, y, w, h },
-        viewport: {
-          x: viewportRect.x,
-          y: viewportRect.y,
-          width: viewportRect.width,
-          height: viewportRect.height
+    if (this.drawingMode === 'freehand') {
+      // Only save if path has enough points
+      if (this.currentPath.length > 10) {
+        // If not already closed, add final point
+        if (!this.pathClosed) {
+          let endX = e.clientX - rect.left;
+          let endY = e.clientY - rect.top;
+          endX = Math.max(0, Math.min(endX, rect.width));
+          endY = Math.max(0, Math.min(endY, rect.height));
+          this.currentPath.push({ x: endX, y: endY });
         }
+
+        // Convert path points to image coordinates
+        const imagePath = this.currentPath.map(point => {
+          const viewportPoint = this.viewer.viewport.viewerElementToViewportCoordinates(
+            new OpenSeadragon.Point(point.x, point.y)
+          );
+          return {
+            x: Math.round(viewportPoint.x * imageWidth),
+            y: Math.round(viewportPoint.y * imageHeight)
+          };
+        });
+
+        // Create SVG path string
+        const pathString = imagePath.map((p, i) =>
+          `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`
+        ).join(' ') + ' Z'; // Close the path
+
+        // Create SVG selector
+        const selector = {
+          type: 'SvgSelector',
+          value: `<svg xmlns="http://www.w3.org/2000/svg"><path d="${pathString}" /></svg>`
+        };
+
+        const selectionData = {
+          source: canvasId || imageUrl,
+          canvasId: canvasId,
+          canvasIndex: this.currentCanvasIndex,
+          canvasLabel: currentCanvas ? currentCanvas.label : null,
+          selector: selector,
+          path: imagePath,
+          svgPath: pathString,
+          viewport: null
+        };
+
+        // Dispatch event
+        this.dispatchEvent(new CustomEvent('image-region-selected', {
+          detail: selectionData,
+          bubbles: true,
+          composed: true
+        }));
+
+        this.updateInfo(`Freehand path selected with ${imagePath.length} points on ${currentCanvas ? currentCanvas.label : 'image'}`);
+      } else {
+        this.updateInfo('Path too short - draw a longer path');
+      }
+
+    } else {
+      // Rectangle mode
+      let endX = e.clientX - rect.left;
+      let endY = e.clientY - rect.top;
+      endX = Math.max(0, Math.min(endX, rect.width));
+      endY = Math.max(0, Math.min(endY, rect.height));
+
+      const endPoint = {
+        x: endX,
+        y: endY
       };
 
-      // Dispatch event
-      this.dispatchEvent(new CustomEvent('image-region-selected', {
-        detail: selectionData,
-        bubbles: true,
-        composed: true
-      }));
+      // Calculate final rectangle in pixel coordinates
+      const pixelX = Math.min(this.startPoint.x, endPoint.x);
+      const pixelY = Math.min(this.startPoint.y, endPoint.y);
+      const pixelWidth = Math.abs(endPoint.x - this.startPoint.x);
+      const pixelHeight = Math.abs(endPoint.y - this.startPoint.y);
 
-      this.updateInfo(`Region selected: ${w}x${h} at (${x}, ${y}) on ${currentCanvas ? currentCanvas.label : 'image'}`);
+      // Convert to viewport coordinates
+      const viewportRect = this.viewer.viewport.viewerElementToViewportRectangle(
+        new OpenSeadragon.Rect(pixelX, pixelY, pixelWidth, pixelHeight)
+      );
+
+      const x = Math.round(viewportRect.x * imageWidth);
+      const y = Math.round(viewportRect.y * imageHeight);
+      const w = Math.round(viewportRect.width * imageWidth);
+      const h = Math.round(viewportRect.height * imageHeight);
+
+      // Only create annotation if rectangle has meaningful size
+      if (w > 5 && h > 5) {
+        // Create IIIF fragment selector
+        const selector = {
+          type: 'FragmentSelector',
+          conformsTo: 'http://www.w3.org/TR/media-frags/',
+          value: `xywh=${x},${y},${w},${h}`
+        };
+
+        const selectionData = {
+          source: canvasId || imageUrl,
+          canvasId: canvasId,
+          canvasIndex: this.currentCanvasIndex,
+          canvasLabel: currentCanvas ? currentCanvas.label : null,
+          selector: selector,
+          region: { x, y, w, h },
+          viewport: {
+            x: viewportRect.x,
+            y: viewportRect.y,
+            width: viewportRect.width,
+            height: viewportRect.height
+          }
+        };
+
+        // Dispatch event
+        this.dispatchEvent(new CustomEvent('image-region-selected', {
+          detail: selectionData,
+          bubbles: true,
+          composed: true
+        }));
+
+        this.updateInfo(`Region selected: ${w}x${h} at (${x}, ${y}) on ${currentCanvas ? currentCanvas.label : 'image'}`);
+      }
     }
 
     this.isSelecting = false;
     this.startPoint = null;
+    this.currentPath = [];
+    this.pathClosed = false;
   }
 
   drawSelectionRect(x, y, width, height) {
@@ -661,36 +826,107 @@ export class IIIFImagePanel extends HTMLElement {
   }
 
   confirmCurrentRect() {
-    // Make the current selection rectangle permanent
-    const currentRect = this.shadowRoot.getElementById('current-selection-rect');
-    if (currentRect) {
+    // Make the current selection (rectangle or freehand path) permanent
+    const currentSelection = this.shadowRoot.getElementById('current-selection-rect');
+    if (currentSelection) {
       // Change ID so it won't be removed by clearCurrentSelectionRect
       const rectId = `confirmed-rect-${this.confirmedRects.length}`;
-      currentRect.id = rectId;
-      currentRect.classList.add('confirmed');
+      currentSelection.id = rectId;
+      currentSelection.classList.add('confirmed');
 
-      // Store viewport coordinates for scaling
-      const pixelRect = {
-        x: parseFloat(currentRect.style.left),
-        y: parseFloat(currentRect.style.top),
-        width: parseFloat(currentRect.style.width),
-        height: parseFloat(currentRect.style.height)
-      };
+      let viewportRect = null;
 
-      // Convert pixel coords to viewport coords
-      const viewportRect = this.viewer.viewport.viewerElementToViewportRectangle(
-        new OpenSeadragon.Rect(pixelRect.x, pixelRect.y, pixelRect.width, pixelRect.height)
-      );
+      // Check if it's a rectangle (div) or freehand (svg)
+      if (currentSelection.tagName === 'DIV') {
+        // Store viewport coordinates for scaling (rectangles only)
+        const pixelRect = {
+          x: parseFloat(currentSelection.style.left),
+          y: parseFloat(currentSelection.style.top),
+          width: parseFloat(currentSelection.style.width),
+          height: parseFloat(currentSelection.style.height)
+        };
+
+        // Convert pixel coords to viewport coords
+        const vRect = this.viewer.viewport.viewerElementToViewportRectangle(
+          new OpenSeadragon.Rect(pixelRect.x, pixelRect.y, pixelRect.width, pixelRect.height)
+        );
+
+        viewportRect = {
+          x: vRect.x,
+          y: vRect.y,
+          width: vRect.width,
+          height: vRect.height
+        };
+      } else if (currentSelection.tagName && currentSelection.tagName.toLowerCase() === 'svg') {
+        // For SVG paths, we don't need viewport rect (path is already in pixel coords)
+        // The path element inside contains the actual drawing
+        const pathElement = currentSelection.querySelector('path');
+        if (pathElement) {
+          // Change stroke color to show it's confirmed
+          pathElement.setAttribute('stroke', '#4CAF50');
+          pathElement.setAttribute('fill', 'rgba(76, 175, 80, 0.3)');
+        }
+        // Enable pointer events for dragging
+        currentSelection.style.pointerEvents = 'auto';
+      }
 
       this.confirmedRects.push({
-        element: currentRect,
-        viewportRect: {
-          x: viewportRect.x,
-          y: viewportRect.y,
-          width: viewportRect.width,
-          height: viewportRect.height
-        }
+        element: currentSelection,
+        viewportRect: viewportRect
       });
+    }
+  }
+
+  drawFreehandPath(points, closed = false) {
+    // Remove existing current path
+    this.clearCurrentSelectionRect();
+
+    if (points.length < 2) return;
+
+    // Create SVG path element
+    const canvas = this.shadowRoot.getElementById('selection-canvas');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.id = 'current-selection-rect'; // Use same ID to be cleared by clearCurrentSelectionRect
+    svg.style.position = 'absolute';
+    svg.style.top = '0';
+    svg.style.left = '0';
+    svg.style.width = '100%';
+    svg.style.height = '100%';
+    svg.style.pointerEvents = 'none';
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+    // Create path data
+    let pathData = points.map((p, i) =>
+      `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`
+    ).join(' ');
+
+    // Close path if requested
+    if (closed) {
+      pathData += ' Z';
+    }
+
+    path.setAttribute('d', pathData);
+    path.setAttribute('stroke', closed ? '#4CAF50' : '#FFC107'); // Green when closed
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('fill', closed ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255, 193, 7, 0.2)');
+    path.setAttribute('stroke-linejoin', 'round');
+    path.setAttribute('stroke-linecap', 'round');
+
+    svg.appendChild(path);
+    canvas.appendChild(svg);
+
+    // Add a circle at start point to show where to snap
+    if (!closed && points.length > 5) {
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', this.startPoint.x);
+      circle.setAttribute('cy', this.startPoint.y);
+      circle.setAttribute('r', '15');
+      circle.setAttribute('fill', 'none');
+      circle.setAttribute('stroke', '#4CAF50');
+      circle.setAttribute('stroke-width', '2');
+      circle.setAttribute('stroke-dasharray', '4,4');
+      svg.appendChild(circle);
     }
   }
 
@@ -698,6 +934,8 @@ export class IIIFImagePanel extends HTMLElement {
     this.clearCurrentSelectionRect();
     this.startPoint = null;
     this.isSelecting = false;
+    this.currentPath = [];
+    this.pathClosed = false;
     this.updateInfo('Selection cleared');
   }
 
