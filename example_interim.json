@@ -1,0 +1,173 @@
+{
+  "@context": [
+    "http://iiif.io/api/presentation/3/context.json",
+    "http://www.w3.org/ns/anno.jsonld",
+    {
+      "interim": "https://w3id.org/interim/",
+      "geko": "https://w3id.org/geko/",
+      "miro": "https://w3id.org/miro/",
+      "mlao": "https://w3id.org/mlao/",
+      "hico": "http://purl.org/emmedi/hico/",
+      "icon": "https://w3id.org/icon/ontology/",
+      "crm": "http://www.cidoc-crm.org/cidoc-crm/",
+      "owl": "http://www.w3.org/2002/07/owl#",
+      "prov": "http://www.w3.org/ns/prov#",
+      "skos": "http://www.w3.org/2004/02/skos/core#"
+    }
+  ],
+  "id": "https://example.org/manifest/quaderno-manoscritto",
+  "type": "Manifest",
+  "label": { "it": [ "Quaderno di appunti su Raffaello" ] },
+  "items": [
+    {
+      "id": "https://example.org/canvas/p1",
+      "type": "Canvas",
+      "label": { "it": [ "Pagina 1" ] },
+      "height": 3000,
+      "width": 2000,
+      "items": [
+        {
+          "id": "https://example.org/page/p1/painting",
+          "type": "AnnotationPage",
+          "items": [
+            {
+              "id": "https://example.org/anno/p1/image",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://example.org/images/p1.jpg",
+                "type": "Image",
+                "format": "image/jpeg",
+                "height": 3000,
+                "width": 2000
+              },
+              "target": "https://example.org/canvas/p1"
+            }
+          ]
+        }
+      ],
+      "annotations": [
+        
+        /* =======================================================
+           1. ANNOTATION PAGE: TRASCRIZIONE DIPLOMATICA
+           Standard IIIF / Web Annotation Data Model
+           ======================================================= */
+        {
+          "id": "https://example.org/anno/page1/transcription",
+          "type": "AnnotationPage",
+          "label": { "it": [ "Trascrizione Diplomatica" ] },
+          "items": [
+            {
+              "id": "https://example.org/anno/line1",
+              "type": "Annotation",
+              "motivation": "transcribing",
+              "body": {
+                "type": "TextualBody",
+                "value": "Osservando la Fornarina, si nota il turbante di seta...",
+                "format": "text/plain",
+                "language": "it"
+              },
+              "target": {
+                "source": "https://example.org/canvas/p1",
+                "selector": {
+                  "type": "FragmentSelector",
+                  "value": "xywh=100,100,800,50"
+                }
+              }
+            }
+          ]
+        },
+
+        /* =======================================================
+           2. ANNOTATION PAGE: ECFRASI (Modello INTERIM)
+           Questa pagina è tipizzata come geko:Ekphrasis
+           ======================================================= */
+        {
+          "id": "https://example.org/data/ekphrasis/fornarina-descrizione",
+          "type": [ "AnnotationPage", "geko:Ekphrasis" ], 
+          "label": { "it": [ "Analisi Ecfrastica: La Fornarina" ] },
+          
+          /* Riferimenti Globali dell'Ecfrasi */
+          "geko:hasTextualReferent": {
+            "id": "https://example.org/works/text/descrizione-raffaello",
+            "type": "crm:E33_Linguistic_Object",
+            "label": { "it": ["Testo della descrizione critica"] }
+          },
+          "geko:hasIconicReferent": {
+            "id": "https://example.org/works/art/la-fornarina",
+            "type": "crm:E22_Man-Made_Object",
+            "label": { "it": ["Il dipinto 'La Fornarina'"] }
+          },
+          
+          "items": [
+            {
+              /* =================================================
+                 LA RELAZIONE INTERMEDIALE (Singola Annotazione)
+                 ================================================= */
+              "id": "https://example.org/anno/relazione-turbante",
+              "type": [ "Annotation", "miro:EkphrasticRelation" ],
+              "motivation": "geko:analysis",
+              
+              /* 1. BODY: Commento libero dell'annotatore 
+                 (Standard Web Annotation per il contenuto creato dall'utente) */
+              "body": {
+                "type": "TextualBody",
+                "value": "In questo passaggio l'autore si sofferma sulla resa materica della seta, ignorando il valore simbolico.",
+                "format": "text/plain",
+                "language": "it"
+              },
+
+              /* 2. PROPRIETÀ: Modalità Retorica 
+                 (Spostata fuori dal body come metadato strutturato) */
+              "geko:hasEkphrasticModality": {
+                "id": "https://w3id.org/geko/denotation",
+                "type": "skos:Concept",
+                "label": { "it": ["Denotazione"] }
+              },
+
+              /* 3. TARGET: Il Ponte Intermediale 
+                 (Collega Testo -> Annotazione Esterna su Immagine) */
+              "target": [
+                /* A. Source (Testo Manoscritto) */
+                {
+                    "source": "https://example.org/canvas/p1",
+                    "selector": {
+                        "type": "FragmentSelector",
+                        "value": "xywh=350,120,100,40"
+                    }
+                },
+                /* B. Target (Annotazione Esterna)
+                   Punta all'ID dell'annotazione remota che contiene 
+                   le coordinate sul dipinto. */
+                "https://barberini.org/iiif/annotations/fornarina/detail-turbante"
+              ],
+
+              /* 4. PROVENANCE: L'atto interpretativo (HICO) */
+              "prov:wasGeneratedBy": {
+                "type": "hico:InterpretationAct",
+                "prov:startedAtTime": "2026-01-21T10:00:00Z",
+                "hico:hasInterpretationCriterion": { 
+                    "id": "http://purl.org/emmedi/hico/criterion/iconographical-analysis",
+                    "label": { "it": ["Analisi Iconografica"] }
+                }
+              },
+
+              /* 5. ANCHOR: Il Concetto Semantico (MLAO) 
+                 Definisce il concetto astratto e lo allinea al vocabolario */
+              "mlao:hasAnchor": {
+                "type": "mlao:Anchor",
+                "mlao:hasConceptualLevel": { "type": "icon:IconographicalSubject" },
+                "mlao:isAnchoredTo": {
+                    "id": "https://example.org/ontology/concepts/turbante-seta",
+                    "type": "skos:Concept",
+                    "label": { "it": ["Turbante in seta"] },
+                    "owl:sameAs": "http://vocab.getty.edu/aat/300210848" 
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

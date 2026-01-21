@@ -1,6 +1,7 @@
 /**
  * Text panel component for displaying and selecting text portions
  * Supports word-level and character-level selection
+ * Supports PAGE XML format (Transkribus)
  */
 export class IIIFTextPanel extends HTMLElement {
   constructor() {
@@ -10,23 +11,40 @@ export class IIIFTextPanel extends HTMLElement {
     this.annotations = [];
     this.currentSelection = null;
     this.currentSelectionElement = null;
-    this.confirmedElements = []; // Store all confirmed (green) text elements
+    this.confirmedElements = []; // Store all confirmed (green) text elements for current page
+    this.pageContainers = {}; // Store page containers by page number: { pageNr: containerElement }
+    this.pageXMLData = null; // Store parsed PAGE XML data
+    this.currentPageNr = null; // Current page number
+    this.metsData = null; // METS file data for page mapping
   }
 
   static get observedAttributes() {
-    return ['src', 'text'];
+    return ['src', 'text', 'pagexml', 'mets'];
   }
 
-  connectedCallback() {
+  async connectedCallback() {
     this.render();
     this.setupEventListeners();
 
-    // Load text if src attribute is provided
+    // Load METS first if provided (wait for it)
+    if (this.hasAttribute('mets')) {
+      await this.loadMETS(this.getAttribute('mets'));
+    }
+
+    // Then load text/PAGE XML
     if (this.hasAttribute('src')) {
       this.loadTextFromUrl(this.getAttribute('src'));
     } else if (this.hasAttribute('text')) {
       this.setTextContent(this.getAttribute('text'));
+    } else if (this.hasAttribute('pagexml')) {
+      this.loadPageXML(this.getAttribute('pagexml'));
     }
+
+    // Listen for canvas changes from image panels
+    // Wait a bit to avoid initial loading conflicts
+    setTimeout(() => {
+      window.addEventListener('canvas-changed', (e) => this.handleCanvasChange(e));
+    }, 500);
   }
 
   attributeChangedCallback(name, oldValue, newValue) {
@@ -36,6 +54,10 @@ export class IIIFTextPanel extends HTMLElement {
       this.loadTextFromUrl(newValue);
     } else if (name === 'text') {
       this.setTextContent(newValue);
+    } else if (name === 'pagexml') {
+      this.loadPageXML(newValue);
+    } else if (name === 'mets') {
+      this.loadMETS(newValue);
     }
   }
 
@@ -69,12 +91,38 @@ export class IIIFTextPanel extends HTMLElement {
         }
 
         input[type="file"] {
-          font-size: 0.8rem;
-          flex-shrink: 1;
-          min-width: 100px;
+          display: none;
+        }
+
+        .file-upload-btn {
+          width: 32px;
+          height: 32px;
+          padding: 0;
           border: 1px solid var(--color-gray-200);
           border-radius: 0;
-          padding: calc(var(--spacing-unit) * 0.5);
+          background: var(--color-white);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+
+        .file-upload-btn svg {
+          width: 18px;
+          height: 18px;
+          stroke: var(--color-black);
+          fill: none;
+          stroke-width: 1.5;
+        }
+
+        .file-upload-btn:hover {
+          background: var(--color-black);
+          border-color: var(--color-black);
+        }
+
+        .file-upload-btn:hover svg {
+          stroke: var(--color-white);
         }
 
         .text-area {
@@ -129,7 +177,6 @@ export class IIIFTextPanel extends HTMLElement {
 
         .text-confirmed.denotation:hover {
           background: #1976D2;
-          box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.3);
         }
 
         .text-confirmed.dynamisation {
@@ -138,7 +185,6 @@ export class IIIFTextPanel extends HTMLElement {
 
         .text-confirmed.dynamisation:hover {
           background: #E64A19;
-          box-shadow: 0 0 0 3px rgba(255, 87, 34, 0.3);
         }
 
         .text-confirmed.integration {
@@ -147,29 +193,50 @@ export class IIIFTextPanel extends HTMLElement {
 
         .text-confirmed.integration:hover {
           background: #7B1FA2;
-          box-shadow: 0 0 0 3px rgba(156, 39, 176, 0.3);
+        }
+
+        .text-confirmed.transcription {
+          background: #4CAF50;
+        }
+
+        .text-confirmed.transcription:hover {
+          background: #388E3C;
         }
 
         button {
-          padding: calc(var(--spacing-unit) * 0.75) calc(var(--spacing-unit) * 1.25);
+          width: 32px;
+          height: 32px;
+          padding: 0;
           border: 1px solid var(--color-gray-200);
           border-radius: 0;
           background: var(--color-white);
           cursor: pointer;
-          font-size: 0.75rem;
-          white-space: nowrap;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           flex-shrink: 0;
           transition: none;
         }
 
+        button svg {
+          width: 18px;
+          height: 18px;
+          stroke: var(--color-black);
+          fill: none;
+          stroke-width: 1.5;
+        }
+
         button:hover:not(:disabled) {
           background: var(--color-black);
-          color: var(--color-white);
           border-color: var(--color-black);
         }
 
+        button:hover:not(:disabled) svg {
+          stroke: var(--color-white);
+        }
+
         button:disabled {
-          opacity: 0.5;
+          opacity: 0.4;
           cursor: not-allowed;
         }
 
@@ -181,6 +248,10 @@ export class IIIFTextPanel extends HTMLElement {
         #confirm-selection-btn:not(:disabled):hover {
           background: #FDD835;
           border-color: #FDD835;
+        }
+
+        #confirm-selection-btn:not(:disabled):hover svg {
+          stroke: var(--color-black);
         }
 
         .info {
@@ -195,9 +266,26 @@ export class IIIFTextPanel extends HTMLElement {
       <div class="container">
         <div class="controls">
           <input type="file" id="file-input" accept=".txt,.xml,.html" />
-          <button id="confirm-selection-btn" disabled>Confirm Text Selection</button>
-          <button id="clear-selection-btn">Clear Selection</button>
-          <button id="clear-btn">Clear Text</button>
+          <label for="file-input" class="file-upload-btn" title="Upload text/XML file">
+            <svg viewBox="0 0 24 24">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+            </svg>
+          </label>
+          <button id="confirm-selection-btn" disabled title="Confirm text selection">
+            <svg viewBox="0 0 24 24">
+              <path d="M5 13l4 4L19 7"/>
+            </svg>
+          </button>
+          <button id="clear-selection-btn" title="Clear selection">
+            <svg viewBox="0 0 24 24">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+          <button id="clear-btn" title="Clear all text">
+            <svg viewBox="0 0 24 24">
+              <path d="M3 6h18M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+            </svg>
+          </button>
           <span class="info" id="info">No text loaded</span>
         </div>
         <div class="text-area" id="text-display"></div>
@@ -225,7 +313,13 @@ export class IIIFTextPanel extends HTMLElement {
     try {
       const response = await fetch(url);
       const text = await response.text();
-      this.setTextContent(text);
+
+      // Detect if XML
+      if (url.endsWith('.xml') || text.trim().startsWith('<?xml')) {
+        this.parsePageXML(text);
+      } else {
+        this.setTextContent(text);
+      }
     } catch (error) {
       console.error('Error loading text:', error);
       this.updateInfo('Error loading text file');
@@ -238,7 +332,14 @@ export class IIIFTextPanel extends HTMLElement {
 
     const reader = new FileReader();
     reader.onload = (e) => {
-      this.setTextContent(e.target.result);
+      const content = e.target.result;
+
+      // Detect if XML based on file extension or content
+      if (file.name.endsWith('.xml') || content.trim().startsWith('<?xml')) {
+        this.parsePageXML(content);
+      } else {
+        this.setTextContent(content);
+      }
     };
     reader.readAsText(file);
   }
@@ -409,6 +510,265 @@ export class IIIFTextPanel extends HTMLElement {
   highlightAnnotation(annotation) {
     // TODO: Implement highlighting of existing annotations
     // This will wrap text segments in <mark> elements
+  }
+
+  // PAGE XML Support Methods
+
+  async loadPageXML(url) {
+    try {
+      console.log('Loading PAGE XML from:', url);
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const xmlText = await response.text();
+      console.log('PAGE XML loaded, length:', xmlText.length);
+      this.parsePageXML(xmlText);
+    } catch (error) {
+      console.error('Error loading PAGE XML from', url, ':', error);
+      this.updateInfo('Error loading PAGE XML file: ' + error.message);
+    }
+  }
+
+  async loadMETS(url) {
+    try {
+      console.log('Loading METS from:', url);
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const xmlText = await response.text();
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+      // Check for parsing errors
+      const parserError = xmlDoc.querySelector('parsererror');
+      if (parserError) {
+        console.error('METS parsing error:', parserError.textContent);
+        this.updateInfo('Error parsing METS file');
+        return;
+      }
+
+      this.metsData = xmlDoc;
+      const fileCount = xmlDoc.querySelectorAll('file').length;
+      console.log('METS loaded successfully:', fileCount, 'files');
+      this.updateInfo(`METS loaded (${fileCount} pages)`);
+    } catch (error) {
+      console.error('Error loading METS from', url, ':', error);
+      this.updateInfo('Error loading METS file: ' + error.message);
+    }
+  }
+
+  parsePageXML(xmlText) {
+    try {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+      // Check for parsing errors
+      const parserError = xmlDoc.querySelector('parsererror');
+      if (parserError) {
+        console.error('XML parsing error:', parserError.textContent);
+        this.updateInfo('Error parsing PAGE XML');
+        return;
+      }
+
+      // Extract page metadata
+      const pageElement = xmlDoc.querySelector('Page');
+      const pageNr = xmlDoc.querySelector('TranskribusMetadata')?.getAttribute('pageNr');
+
+      console.log('Parsing PAGE XML:', { pageNr, linesCount: xmlDoc.querySelectorAll('TextLine').length });
+
+      this.currentPageNr = pageNr;
+      this.pageXMLData = {
+        pageNr: pageNr,
+        imageWidth: pageElement?.getAttribute('imageWidth'),
+        imageHeight: pageElement?.getAttribute('imageHeight'),
+        lines: []
+      };
+
+      // Extract text lines
+      const textLines = xmlDoc.querySelectorAll('TextLine');
+      textLines.forEach(line => {
+        const lineId = line.getAttribute('id');
+        const coords = line.querySelector('Coords')?.getAttribute('points');
+        const baseline = line.querySelector('Baseline')?.getAttribute('points');
+        const unicode = line.querySelector('Unicode')?.textContent || '';
+
+        if (unicode.trim()) {
+          this.pageXMLData.lines.push({
+            id: lineId,
+            coords: coords,
+            baseline: baseline,
+            text: unicode
+          });
+        }
+      });
+
+      console.log('Parsed lines:', this.pageXMLData.lines.length);
+
+      // Render the text lines
+      this.renderPageXML();
+      this.updateInfo(`Loaded PAGE XML: Page ${pageNr || 'unknown'} (${this.pageXMLData.lines.length} lines)`);
+    } catch (error) {
+      console.error('Error in parsePageXML:', error);
+      this.updateInfo('Error parsing PAGE XML: ' + error.message);
+    }
+  }
+
+  renderPageXML() {
+    if (!this.pageXMLData) {
+      console.warn('No PAGE XML data to render');
+      return;
+    }
+
+    const textDisplay = this.shadowRoot.getElementById('text-display');
+    if (!textDisplay) {
+      console.error('Text display element not found');
+      return;
+    }
+
+    const pageNr = this.pageXMLData.pageNr;
+
+    // Hide all other page containers
+    Object.keys(this.pageContainers).forEach(pnr => {
+      if (pnr !== pageNr) {
+        this.pageContainers[pnr].style.display = 'none';
+      }
+    });
+
+    // Check if this page already has a container
+    if (this.pageContainers[pageNr]) {
+      // Page already rendered, just show it
+      this.pageContainers[pageNr].style.display = 'block';
+      console.log('Showing existing container for page', pageNr);
+
+      // Update confirmed elements list from this container
+      this.confirmedElements = [];
+      const confirmedElems = this.pageContainers[pageNr].querySelectorAll('.text-confirmed');
+      confirmedElems.forEach(elem => {
+        // Find the corresponding item in unlinkedTextElements
+        const textItem = {
+          element: elem,
+          selection: {
+            text: elem.textContent,
+            // We can reconstruct other properties if needed
+          }
+        };
+        this.confirmedElements.push(textItem);
+      });
+
+      return;
+    }
+
+    // Create new container for this page
+    const container = document.createElement('div');
+    container.style.cssText = 'line-height: 1.8; font-family: Georgia, serif;';
+    container.dataset.pageNr = pageNr;
+
+    if (this.pageXMLData.lines.length === 0) {
+      const emptyMsg = document.createElement('div');
+      emptyMsg.style.cssText = 'padding: 2rem; text-align: center; color: #999; font-style: italic;';
+      emptyMsg.textContent = `Page ${pageNr || 'unknown'} has no transcription`;
+      container.appendChild(emptyMsg);
+      this.updateInfo(`Page ${pageNr || 'unknown'}: No text transcribed`);
+    } else {
+      this.pageXMLData.lines.forEach((line, index) => {
+        const lineDiv = document.createElement('div');
+        lineDiv.style.cssText = 'margin-bottom: 0.5rem; cursor: text;';
+        lineDiv.textContent = line.text;
+        lineDiv.dataset.lineId = line.id;
+        lineDiv.dataset.coords = line.coords || '';
+        lineDiv.dataset.baseline = line.baseline || '';
+
+        container.appendChild(lineDiv);
+      });
+    }
+
+    // Store container for this page
+    this.pageContainers[pageNr] = container;
+    textDisplay.appendChild(container);
+
+    // Update textContent for plain text operations
+    this.textContent = this.pageXMLData.lines.map(l => l.text).join('\n');
+
+    console.log('Rendered new container for page', pageNr, 'with', this.pageXMLData.lines.length, 'lines');
+  }
+
+  loadPageByNumber(pageNr) {
+    if (!this.metsData) {
+      console.warn('METS data not loaded');
+      return;
+    }
+
+    console.log('Looking for page number:', pageNr);
+
+    // Find the file in METS for this page number
+    const fileElements = this.metsData.querySelectorAll('file');
+    for (const fileEl of fileElements) {
+      const seq = parseInt(fileEl.getAttribute('SEQ'));
+      if (seq === pageNr) {
+        const flocatEl = fileEl.querySelector('FLocat');
+        if (!flocatEl) {
+          console.warn('No FLocat element found');
+          continue;
+        }
+
+        // Try multiple ways to get href attribute
+        let href = flocatEl.getAttributeNS('http://www.w3.org/1999/xlink', 'href') ||  // Standard xlink:href
+                   flocatEl.getAttribute('ns2:href') ||   // ns2:href (Transkribus METS)
+                   flocatEl.getAttribute('xlink:href') ||  // Prefixed attribute
+                   flocatEl.getAttribute('href');          // Plain href
+
+        if (href) {
+          // Build path relative to current location
+          const fullPath = `/examples/${href}`;
+          console.log('Loading PAGE XML for page', pageNr, ':', fullPath);
+          this.loadPageXML(fullPath);
+          return;
+        } else {
+          console.warn('Could not find href attribute on FLocat element');
+        }
+      }
+    }
+
+    console.warn(`No PAGE XML found for page ${pageNr}`);
+    this.updateInfo(`No PAGE XML found for page ${pageNr}`);
+  }
+
+  handleCanvasChange(event) {
+    // Only sync with facsimile panels, not other image panels (like painting)
+    const detail = event.detail;
+
+    // Skip if this event is not from a facsimile panel
+    if (detail.panelType !== 'facsimile') {
+      return;
+    }
+
+    if (!this.metsData) {
+      // No METS loaded, don't try to sync
+      return;
+    }
+
+    const { canvasIndex, canvasLabel } = detail;
+    const pageNr = canvasIndex + 1;
+
+    // Only load if page number is within METS range (26 pages)
+    if (pageNr <= 26) {
+      this.loadPageByNumber(pageNr);
+    }
+  }
+
+  enableCanvasSync() {
+    // Enable syncing with canvas navigation
+    if (!this._canvasSyncEnabled) {
+      window.addEventListener('canvas-changed', (e) => this.handleCanvasChange(e));
+      this._canvasSyncEnabled = true;
+      console.log('Canvas sync enabled for text panel');
+    }
   }
 }
 

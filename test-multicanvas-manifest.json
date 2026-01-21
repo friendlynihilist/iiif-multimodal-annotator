@@ -1,0 +1,113 @@
+{
+  "@context": "http://iiif.io/api/presentation/3/context.json",
+  "id": "https://example.org/manifest/quaderno-test",
+  "type": "Manifest",
+  "label": { "it": [ "Quaderno di Test - Multi Canvas" ] },
+  "items": [
+    {
+      "id": "https://example.org/canvas/page1",
+      "type": "Canvas",
+      "label": { "it": [ "Pagina 1" ] },
+      "height": 3000,
+      "width": 2000,
+      "items": [
+        {
+          "id": "https://example.org/page/p1/painting",
+          "type": "AnnotationPage",
+          "items": [
+            {
+              "id": "https://example.org/anno/p1/image",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://iiif.bodleian.ox.ac.uk/iiif/image/b5994701-fcda-4d33-b0a1-ca82c2c9e70b",
+                "type": "Image",
+                "format": "image/jpeg",
+                "height": 3000,
+                "width": 2000,
+                "service": [
+                  {
+                    "id": "https://iiif.bodleian.ox.ac.uk/iiif/image/b5994701-fcda-4d33-b0a1-ca82c2c9e70b",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              },
+              "target": "https://example.org/canvas/page1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "https://example.org/canvas/page2",
+      "type": "Canvas",
+      "label": { "it": [ "Pagina 2" ] },
+      "height": 3000,
+      "width": 2000,
+      "items": [
+        {
+          "id": "https://example.org/page/p2/painting",
+          "type": "AnnotationPage",
+          "items": [
+            {
+              "id": "https://example.org/anno/p2/image",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://iiif.bodleian.ox.ac.uk/iiif/image/fd20bca8-c608-41e5-a794-f2cffc78f6db",
+                "type": "Image",
+                "format": "image/jpeg",
+                "height": 3000,
+                "width": 2000,
+                "service": [
+                  {
+                    "id": "https://iiif.bodleian.ox.ac.uk/iiif/image/fd20bca8-c608-41e5-a794-f2cffc78f6db",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              },
+              "target": "https://example.org/canvas/page2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "https://example.org/canvas/page3",
+      "type": "Canvas",
+      "label": { "it": [ "Pagina 3 - La Fornarina" ] },
+      "height": 2500,
+      "width": 1800,
+      "items": [
+        {
+          "id": "https://example.org/page/p3/painting",
+          "type": "AnnotationPage",
+          "items": [
+            {
+              "id": "https://example.org/anno/p3/image",
+              "type": "Annotation",
+              "motivation": "painting",
+              "body": {
+                "id": "https://iiif.bodleian.ox.ac.uk/iiif/image/b5994701-fcda-4d33-b0a1-ca82c2c9e70b",
+                "type": "Image",
+                "format": "image/jpeg",
+                "height": 2500,
+                "width": 1800,
+                "service": [
+                  {
+                    "id": "https://iiif.bodleian.ox.ac.uk/iiif/image/b5994701-fcda-4d33-b0a1-ca82c2c9e70b",
+                    "type": "ImageService3",
+                    "profile": "level2"
+                  }
+                ]
+              },
+              "target": "https://example.org/canvas/page3"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

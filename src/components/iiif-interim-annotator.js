@@ -44,6 +44,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
       <style>
         :host {
           display: flex;
+          flex-direction: column;
           width: 100%;
           height: 100vh;
           font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -58,12 +59,62 @@ export class IIIFInterimAnnotator extends HTMLElement {
           --spacing-unit: 8px;
         }
 
+        .app-header {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 48px;
+          background: var(--color-black);
+          color: var(--color-white);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0 calc(var(--spacing-unit) * 2);
+          z-index: 10000;
+          border-bottom: 1px solid var(--color-black);
+        }
+
+        .app-title {
+          font-size: 1rem;
+          font-weight: 400;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+        }
+
+        .app-info-btn {
+          width: 32px;
+          height: 32px;
+          border: 1px solid var(--color-white);
+          border-radius: 0;
+          background: transparent;
+          color: var(--color-white);
+          font-size: 1rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: none;
+        }
+
+        .app-info-btn:hover {
+          background: var(--color-white);
+          color: var(--color-black);
+        }
+
+        .main-wrapper {
+          display: flex;
+          width: 100%;
+          height: calc(100vh - 48px);
+          margin-top: 48px;
+        }
+
         .sidebar {
           position: fixed;
           left: 0;
-          top: 0;
+          top: 48px;
           width: 48px;
-          height: 100vh;
+          height: calc(100vh - 48px);
           background: var(--color-black);
           display: flex;
           flex-direction: column;
@@ -184,7 +235,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
         .container {
           display: flex;
           width: calc(100% - 48px);
-          height: calc(100vh - 40px);
+          height: 100%;
           gap: 0;
           padding: 0;
           position: relative;
@@ -300,27 +351,44 @@ export class IIIFInterimAnnotator extends HTMLElement {
         }
 
         .toolbar button {
-          padding: calc(var(--spacing-unit) * 1) calc(var(--spacing-unit) * 1.5);
+          width: 32px;
+          height: 32px;
+          padding: 0;
           border: 1px solid var(--color-black);
           border-radius: 0;
           background: var(--color-black);
-          color: var(--color-white);
           cursor: pointer;
-          font-weight: 400;
-          font-size: 0.85rem;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           transition: none;
+        }
+
+        .toolbar button svg {
+          width: 18px;
+          height: 18px;
+          stroke: var(--color-white);
+          fill: none;
+          stroke-width: 1.5;
         }
 
         .toolbar button:hover {
           background: var(--color-white);
-          color: var(--color-black);
+          border-color: var(--color-black);
+        }
+
+        .toolbar button:hover svg {
+          stroke: var(--color-black);
         }
 
         .toolbar button:disabled {
           background: var(--color-gray-300);
           border-color: var(--color-gray-300);
-          color: var(--color-gray-700);
           cursor: not-allowed;
+        }
+
+        .toolbar button:disabled svg {
+          stroke: var(--color-gray-700);
         }
 
         .status {
@@ -346,16 +414,28 @@ export class IIIFInterimAnnotator extends HTMLElement {
           overflow: visible;
         }
 
+        #connection-overlay * {
+          pointer-events: all;
+        }
+
         .container {
           position: relative;
         }
 
         .connection-line {
           fill: none;
-          stroke-width: 1.5;
+          stroke-width: 2;
           opacity: 1;
           filter: none;
           will-change: d;
+          cursor: pointer;
+          pointer-events: all;
+          transition: stroke-width 0.1s ease;
+        }
+
+        .connection-line:hover {
+          stroke-width: 4;
+          opacity: 0.8;
         }
 
         .connection-line.denotation {
@@ -368,6 +448,20 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
         .connection-line.integration {
           stroke: #9C27B0;
+        }
+
+        .connection-line.transcription {
+          stroke: #4CAF50;
+          stroke-dasharray: 4,4;
+        }
+
+        /* Invisible wider stroke for easier clicking */
+        .connection-hit-area {
+          fill: none;
+          stroke: transparent;
+          stroke-width: 20;
+          cursor: pointer;
+          pointer-events: all;
         }
 
         .connection-label {
@@ -549,20 +643,183 @@ export class IIIFInterimAnnotator extends HTMLElement {
         .modal-overlay.active {
           display: block;
         }
+
+        .connection-menu {
+          position: fixed;
+          background: var(--color-white);
+          border: 1px solid var(--color-black);
+          border-radius: 0;
+          padding: 0;
+          box-shadow: none;
+          z-index: 10001;
+          display: none;
+          min-width: 150px;
+        }
+
+        .connection-menu.active {
+          display: block;
+        }
+
+        .connection-menu-item {
+          padding: calc(var(--spacing-unit) * 1) calc(var(--spacing-unit) * 1.5);
+          border: none;
+          background: var(--color-white);
+          width: 100%;
+          text-align: left;
+          cursor: pointer;
+          font-size: 0.85rem;
+          transition: none;
+          border-bottom: 1px solid var(--color-gray-200);
+        }
+
+        .connection-menu-item:last-child {
+          border-bottom: none;
+        }
+
+        .connection-menu-item:hover {
+          background: var(--color-gray-100);
+        }
+
+        .connection-menu-item.danger {
+          color: #d32f2f;
+        }
+
+        .connection-menu-item.danger:hover {
+          background: #ffebee;
+        }
+
+        .about-modal {
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: var(--color-white);
+          border: 1px solid var(--color-black);
+          border-radius: 0;
+          padding: calc(var(--spacing-unit) * 4);
+          box-shadow: none;
+          z-index: 10002;
+          display: none;
+          max-width: 600px;
+          max-height: 80vh;
+          overflow-y: auto;
+        }
+
+        .about-modal.active {
+          display: block;
+        }
+
+        .about-modal h2 {
+          margin: 0 0 calc(var(--spacing-unit) * 2) 0;
+          font-size: 1.5rem;
+          font-weight: 400;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+        }
+
+        .about-modal h3 {
+          margin: calc(var(--spacing-unit) * 3) 0 calc(var(--spacing-unit) * 1) 0;
+          font-size: 1rem;
+          font-weight: 400;
+          color: var(--color-gray-700);
+        }
+
+        .about-modal p {
+          margin: 0 0 calc(var(--spacing-unit) * 2) 0;
+          line-height: 1.6;
+          color: var(--color-gray-700);
+        }
+
+        .about-modal ul {
+          margin: 0 0 calc(var(--spacing-unit) * 2) 0;
+          padding-left: calc(var(--spacing-unit) * 3);
+          color: var(--color-gray-700);
+        }
+
+        .about-modal li {
+          margin-bottom: calc(var(--spacing-unit) * 0.5);
+        }
+
+        .about-modal .close-btn {
+          position: absolute;
+          top: calc(var(--spacing-unit) * 2);
+          right: calc(var(--spacing-unit) * 2);
+          width: 32px;
+          height: 32px;
+          border: 1px solid var(--color-black);
+          background: transparent;
+          font-size: 1.2rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 0;
+        }
+
+        .about-modal .close-btn:hover {
+          background: var(--color-black);
+          color: var(--color-white);
+        }
+
+        .color-legend {
+          display: flex;
+          gap: calc(var(--spacing-unit) * 2);
+          flex-wrap: wrap;
+          margin: calc(var(--spacing-unit) * 2) 0;
+        }
+
+        .color-item {
+          display: flex;
+          align-items: center;
+          gap: calc(var(--spacing-unit) * 1);
+        }
+
+        .color-box {
+          width: 32px;
+          height: 16px;
+          border: 1px solid var(--color-gray-300);
+        }
+
+        .color-box.denotation {
+          background: #2196F3;
+        }
+
+        .color-box.dynamisation {
+          background: #FF5722;
+        }
+
+        .color-box.integration {
+          background: #9C27B0;
+        }
+
+        .color-box.transcription {
+          background: #4CAF50;
+        }
       </style>
 
-      <div class="sidebar">
-        <button class="sidebar-btn add" id="add-panel-btn" title="Add Panel">+</button>
-        <div class="panel-list" id="panel-list"></div>
-      </div>
+      <header class="app-header">
+        <div class="app-title">IIIF INTERIM Annotator</div>
+        <button class="app-info-btn" id="app-info-btn" title="About this project">?</button>
+      </header>
 
-      <div class="container">
-        <svg id="connection-overlay"></svg>
-        <div class="panels-area" id="panels-area"></div>
+      <div class="main-wrapper">
+        <div class="sidebar">
+          <button class="sidebar-btn add" id="add-panel-btn" title="Add Panel">+</button>
+          <div class="panel-list" id="panel-list"></div>
+        </div>
+
+        <div class="container">
+          <svg id="connection-overlay"></svg>
+          <div class="panels-area" id="panels-area"></div>
+        </div>
       </div>
 
       <div class="toolbar">
-        <button id="export-btn">Export Annotations</button>
+        <button id="export-btn" title="Export annotations">
+          <svg viewBox="0 0 24 24">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+          </svg>
+        </button>
         <span class="status" id="status">Ready - Select and confirm text/image, then drag to link</span>
         <span class="copyright">© 2026 Carlo Teo Pedretti</span>
       </div>
@@ -612,6 +869,66 @@ export class IIIFInterimAnnotator extends HTMLElement {
           </button>
         </div>
       </div>
+
+      <div class="connection-menu" id="connection-menu">
+        <button class="connection-menu-item" id="connection-info">View Details</button>
+        <button class="connection-menu-item danger" id="connection-delete">Delete Connection</button>
+      </div>
+
+      <div class="about-modal" id="about-modal">
+        <button class="close-btn" id="close-about-btn">×</button>
+        <h2>IIIF INTERIM Annotator</h2>
+
+        <p>
+          A web-based tool for creating semantic annotations between manuscript transcriptions and artwork images,
+          specifically designed for ekphrastic analysis using the INTERIM and GEKO ontologies.
+        </p>
+
+        <h3>Features</h3>
+        <ul>
+          <li>Multi-canvas IIIF manifest navigation with synchronized panels</li>
+          <li>PAGE XML transcription support (Transkribus format)</li>
+          <li>Dual annotation models: simple transcription and ekphrastic relations</li>
+          <li>Visual drag-and-drop interface for linking text to images</li>
+          <li>Persistent annotations across canvas navigation</li>
+          <li>Export to Web Annotation Data Model (JSON-LD)</li>
+        </ul>
+
+        <h3>Annotation Types</h3>
+        <div class="color-legend">
+          <div class="color-item">
+            <div class="color-box denotation"></div>
+            <span>Denotation - Direct reference</span>
+          </div>
+          <div class="color-item">
+            <div class="color-box dynamisation"></div>
+            <span>Dynamisation - Movement/temporal</span>
+          </div>
+          <div class="color-item">
+            <div class="color-box integration"></div>
+            <span>Integration - Interpretive blend</span>
+          </div>
+          <div class="color-item">
+            <div class="color-box transcription"></div>
+            <span>Transcription - Facsimile to text</span>
+          </div>
+        </div>
+
+        <h3>How to Use</h3>
+        <ul>
+          <li><strong>Select text:</strong> Highlight text in the Transcription panel and click "Confirm"</li>
+          <li><strong>Select image region:</strong> Enable selection mode and draw a rectangle on the image</li>
+          <li><strong>Create connection:</strong> Drag from confirmed text to confirmed image region</li>
+          <li><strong>Choose modality:</strong> Select the ekphrastic relationship type (for Painting panel)</li>
+          <li><strong>Manage connections:</strong> Click on connection lines to view details or delete</li>
+          <li><strong>Export:</strong> Use the export button to download all annotations as JSON</li>
+        </ul>
+
+        <p style="margin-top: calc(var(--spacing-unit) * 3); font-size: 0.85rem; color: var(--color-gray-700);">
+          Built with Web Components, OpenSeadragon, and IIIF standards.<br>
+          © 2026 Carlo Teo Pedretti
+        </p>
+      </div>
     `;
   }
 
@@ -622,12 +939,22 @@ export class IIIFInterimAnnotator extends HTMLElement {
     const modalOverlay = this.shadowRoot.getElementById('modal-overlay');
     const addPanelModal = this.shadowRoot.getElementById('add-panel-modal');
     const panelTypeButtons = this.shadowRoot.querySelectorAll('.panel-type-btn');
+    const appInfoBtn = this.shadowRoot.getElementById('app-info-btn');
+    const aboutModal = this.shadowRoot.getElementById('about-modal');
+    const closeAboutBtn = this.shadowRoot.getElementById('close-about-btn');
+
+    // About modal
+    appInfoBtn.addEventListener('click', () => this.openAboutModal());
+    closeAboutBtn.addEventListener('click', () => this.closeAboutModal());
 
     // Add panel button
     addPanelBtn.addEventListener('click', () => this.openAddPanelModal());
 
     // Close modal on overlay click
-    modalOverlay.addEventListener('click', () => this.closeAddPanelModal());
+    modalOverlay.addEventListener('click', () => {
+      this.closeAddPanelModal();
+      this.closeAboutModal();
+    });
 
     // Panel type selection
     panelTypeButtons.forEach(btn => {
@@ -656,10 +983,17 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
         // Find which panel has the current selection
         let sourcePanel = null;
+        let sourcePanelConfig = null;
         for (const panel of imagePanels) {
           const currentRect = panel.shadowRoot?.querySelector('#current-selection-rect');
           if (currentRect) {
             sourcePanel = panel;
+            // Find the panel configuration to get panel type
+            const panelDiv = panel.closest('.panel');
+            if (panelDiv) {
+              const panelId = panelDiv.id;
+              sourcePanelConfig = this.panels.find(p => p.id === panelId);
+            }
             break;
           }
         }
@@ -669,7 +1003,12 @@ export class IIIFInterimAnnotator extends HTMLElement {
           const allConfirmedRects = sourcePanel.shadowRoot?.querySelectorAll('.selection-rect.confirmed');
           if (allConfirmedRects && allConfirmedRects.length > 0) {
             const rect = allConfirmedRects[allConfirmedRects.length - 1];
-            this.unlinkedImageRects.push({ element: rect, selection: e.detail, panel: sourcePanel });
+            this.unlinkedImageRects.push({
+              element: rect,
+              selection: e.detail,
+              panel: sourcePanel,
+              panelType: sourcePanelConfig?.type || 'image' // Store panel type
+            });
             this.makeDraggable(rect, 'image');
           }
         }
@@ -690,6 +1029,14 @@ export class IIIFInterimAnnotator extends HTMLElement {
     // Global mouse events for dragging
     document.addEventListener('mousemove', (e) => this.handleDragMove(e));
     document.addEventListener('mouseup', (e) => this.handleDragEnd(e));
+
+    // Close connection menu on click outside
+    document.addEventListener('click', (e) => {
+      const menu = this.shadowRoot.getElementById('connection-menu');
+      if (menu && !menu.contains(e.target)) {
+        this.hideConnectionMenu();
+      }
+    });
   }
 
   setupScrollListeners() {
@@ -772,6 +1119,23 @@ export class IIIFInterimAnnotator extends HTMLElement {
     // Check if elements still exist
     if (!textElement || !imageRect || !path) return;
 
+    // Check if elements are visible (not display:none and have dimensions)
+    const textVisible = textElement.offsetParent !== null &&
+                       window.getComputedStyle(textElement).display !== 'none';
+    const imageVisible = imageRect.offsetParent !== null &&
+                        window.getComputedStyle(imageRect).display !== 'none';
+
+    // If either element is hidden, hide the connection
+    if (!textVisible || !imageVisible) {
+      path.style.display = 'none';
+      if (label) label.style.display = 'none';
+      return;
+    }
+
+    // Show the connection if both elements are visible
+    path.style.display = 'block';
+    if (label) label.style.display = 'block';
+
     // Get container bounds for relative positioning
     const container = this.shadowRoot.querySelector('.container');
     if (!container) return;
@@ -816,7 +1180,14 @@ export class IIIFInterimAnnotator extends HTMLElement {
   }
 
   handleDragStart(element, type, event) {
-    this.draggingFrom = { element, type };
+    // Look up panelType if dragging from an image
+    let panelType = null;
+    if (type === 'image') {
+      const imageItem = this.unlinkedImageRects.find(i => i.element === element);
+      panelType = imageItem?.panelType;
+    }
+
+    this.draggingFrom = { element, type, panelType };
     element.style.cursor = 'grabbing';
 
     // Create temporary path
@@ -878,19 +1249,30 @@ export class IIIFInterimAnnotator extends HTMLElement {
     const target = this.findDropTarget(event, fromType);
 
     if (target) {
-      // Store pending connection and show modality selector
+      // Determine which element is the image (to check panel type)
+      const imageTarget = fromType === 'image' ? this.draggingFrom : target;
+      const targetPanelType = imageTarget.panelType || target.panelType;
+
+      // Store pending connection
       this.pendingConnection = {
         from: this.draggingFrom,
         to: target
       };
 
-      // Position modality selector near mouse cursor
-      const modalitySelector = this.shadowRoot.getElementById('modality-selector');
-      modalitySelector.style.left = `${event.clientX + 20}px`;
-      modalitySelector.style.top = `${event.clientY - 50}px`;
-      modalitySelector.classList.add('active');
-
-      this.updateStatus('Select ekphrastic modality...');
+      // Check if this is a facsimile connection (text to facsimile)
+      if (targetPanelType === 'facsimile') {
+        // For facsimile, create simple transcription annotation directly
+        this.createConnectionBetween(this.pendingConnection.from, this.pendingConnection.to, null, 'facsimile');
+        this.pendingConnection = null;
+        this.draggingFrom = null;
+      } else {
+        // For painting/image, show modality selector
+        const modalitySelector = this.shadowRoot.getElementById('modality-selector');
+        modalitySelector.style.left = `${event.clientX + 20}px`;
+        modalitySelector.style.top = `${event.clientY - 50}px`;
+        modalitySelector.classList.add('active');
+        this.updateStatus('Select ekphrastic modality...');
+      }
     } else {
       this.updateStatus('Connection cancelled');
       this.draggingFrom = null;
@@ -927,7 +1309,8 @@ export class IIIFInterimAnnotator extends HTMLElement {
           type: targetType,
           selection: item.selection,
           distance: distance,
-          bounds: bounds
+          bounds: bounds,
+          panelType: item.panelType // Include panel type for images
         });
       }
     }
@@ -942,7 +1325,8 @@ export class IIIFInterimAnnotator extends HTMLElement {
     return {
       element: closest.element,
       type: closest.type,
-      selection: closest.selection
+      selection: closest.selection,
+      panelType: closest.panelType // Pass panel type to caller
     };
   }
 
@@ -970,7 +1354,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
     this.draggingFrom = null;
   }
 
-  createConnectionBetween(from, to, modality = 'denotation') {
+  createConnectionBetween(from, to, modality = 'denotation', panelType = 'image') {
     // Determine which is text and which is image
     let textElement, textSelection, imageRect, imageSelection;
 
@@ -1002,45 +1386,87 @@ export class IIIFInterimAnnotator extends HTMLElement {
       return;
     }
 
-    // Property URI based on modality
-    const modalityProperty = {
-      denotation: 'http://w3id.org/geko/denotation',
-      dynamisation: 'http://w3id.org/geko/dynamisation',
-      integration: 'http://w3id.org/geko/integration'
-    }[modality];
+    let annotation;
 
-    // Create annotation
-    const annotation = {
-      '@context': 'http://www.w3.org/ns/anno.jsonld',
-      type: 'Annotation',
-      id: `annotation-${Date.now()}`,
-      motivation: 'linking',
-      body: {
-        type: 'TextualBody',
-        value: textSelection.text,
-        format: 'text/plain',
-        selector: textSelection.selector,
-        class: 'lrmoo:F2_Expression' // LRMoo Expression class
-      },
-      target: {
-        type: 'Image',
-        source: imageSelection.source,
-        selector: imageSelection.selector,
-        class: 'lrmoo:F1_Work' // LRMoo Work class
-      },
-      property: modalityProperty,
-      modality: modality,
-      created: new Date().toISOString()
-    };
+    // Create different annotation structures based on panel type
+    if (panelType === 'facsimile') {
+      // Simple Web Annotation for facsimile (transcription)
+      annotation = {
+        '@context': 'http://www.w3.org/ns/anno.jsonld',
+        type: 'Annotation',
+        id: `annotation-${Date.now()}`,
+        motivation: 'transcribing', // Standard Web Annotation motivation
+        body: {
+          type: 'TextualBody',
+          value: textSelection.text,
+          format: 'text/plain',
+          selector: textSelection.selector,
+          // Include PAGE XML metadata if available
+          lineId: textSelection.lineId || null,
+          coords: textSelection.coords || null,
+          pageNr: textSelection.pageNr || null
+        },
+        target: {
+          type: 'Image',
+          source: imageSelection.source,
+          selector: imageSelection.selector,
+          canvasId: imageSelection.canvasId || null,
+          canvasIndex: imageSelection.canvasIndex !== undefined ? imageSelection.canvasIndex : null,
+          canvasLabel: imageSelection.canvasLabel || null
+        },
+        created: new Date().toISOString()
+      };
+
+      // Use neutral color for transcription connections
+      textElement.classList.add('transcription');
+      imageRect.classList.add('transcription');
+
+      // Draw connection line with transcription style
+      this.drawConnectionLineBetween(textElement, imageRect, 'transcription');
+
+    } else {
+      // INTERIM/GEKO model for painting (ekphrastic analysis)
+      const modalityProperty = {
+        denotation: 'http://w3id.org/geko/denotation',
+        dynamisation: 'http://w3id.org/geko/dynamisation',
+        integration: 'http://w3id.org/geko/integration'
+      }[modality];
+
+      annotation = {
+        '@context': 'http://www.w3.org/ns/anno.jsonld',
+        type: 'Annotation',
+        id: `annotation-${Date.now()}`,
+        motivation: 'linking',
+        body: {
+          type: 'TextualBody',
+          value: textSelection.text,
+          format: 'text/plain',
+          selector: textSelection.selector,
+          class: 'lrmoo:F2_Expression' // LRMoo Expression class
+        },
+        target: {
+          type: 'Image',
+          source: imageSelection.source,
+          selector: imageSelection.selector,
+          class: 'lrmoo:F1_Work', // LRMoo Work class
+          canvasId: imageSelection.canvasId || null,
+          canvasIndex: imageSelection.canvasIndex !== undefined ? imageSelection.canvasIndex : null,
+          canvasLabel: imageSelection.canvasLabel || null
+        },
+        property: modalityProperty,
+        modality: modality,
+        created: new Date().toISOString()
+      };
+
+      // Apply modality color to both elements
+      textElement.classList.add(modality);
+      imageRect.classList.add(modality);
+
+      // Draw permanent connection line with modality
+      this.drawConnectionLineBetween(textElement, imageRect, modality);
+    }
 
     this.annotations.push(annotation);
-
-    // Apply modality color to both elements
-    textElement.classList.add(modality);
-    imageRect.classList.add(modality);
-
-    // Draw permanent connection line with modality
-    this.drawConnectionLineBetween(textElement, imageRect, modality);
 
     // DON'T remove from unlinked lists - keep them draggable for multiple connections!
     // Elements stay draggable and can be connected multiple times
@@ -1055,7 +1481,11 @@ export class IIIFInterimAnnotator extends HTMLElement {
     const textConnections = this.connections.filter(c => c.textElement === textElement).length;
     const imageConnections = this.connections.filter(c => c.imageRect === imageRect).length;
 
-    this.updateStatus(`Connected via ${modality}! (Text: ${textConnections} links, Image: ${imageConnections} links)`);
+    if (panelType === 'facsimile') {
+      this.updateStatus(`Transcription linked! (Text: ${textConnections} links, Facsimile: ${imageConnections} links)`);
+    } else {
+      this.updateStatus(`Connected via ${modality}! (Text: ${textConnections} links, Image: ${imageConnections} links)`);
+    }
   }
 
   drawConnectionLineBetween(textElement, imageRect, modality = 'denotation') {
@@ -1095,7 +1525,15 @@ export class IIIFInterimAnnotator extends HTMLElement {
     label.setAttribute('x', midX);
     label.setAttribute('y', midY - 5);
     label.setAttribute('class', 'connection-label');
-    label.textContent = `geko:${modality}`;
+    // Different label text for transcription vs ekphrastic modalities
+    label.textContent = modality === 'transcription' ? 'transcribing' : `geko:${modality}`;
+
+    // Add click listener to path for connection menu
+    const connectionIndex = this.connections.length;
+    path.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.showConnectionMenu(e, connectionIndex);
+    });
 
     svg.appendChild(path);
     svg.appendChild(label);
@@ -1113,6 +1551,73 @@ export class IIIFInterimAnnotator extends HTMLElement {
   updateStatus(message) {
     const status = this.shadowRoot.getElementById('status');
     status.textContent = message;
+  }
+
+  showConnectionMenu(event, connectionIndex) {
+    const menu = this.shadowRoot.getElementById('connection-menu');
+    const infoBtn = this.shadowRoot.getElementById('connection-info');
+    const deleteBtn = this.shadowRoot.getElementById('connection-delete');
+
+    // Store current connection index
+    this.selectedConnectionIndex = connectionIndex;
+
+    // Position menu near click
+    menu.style.left = `${event.clientX}px`;
+    menu.style.top = `${event.clientY}px`;
+    menu.classList.add('active');
+
+    // Remove old listeners
+    infoBtn.onclick = null;
+    deleteBtn.onclick = null;
+
+    // Add new listeners
+    infoBtn.onclick = () => this.showConnectionInfo(connectionIndex);
+    deleteBtn.onclick = () => this.deleteConnection(connectionIndex);
+  }
+
+  hideConnectionMenu() {
+    const menu = this.shadowRoot.getElementById('connection-menu');
+    menu.classList.remove('active');
+  }
+
+  showConnectionInfo(connectionIndex) {
+    const connection = this.connections[connectionIndex];
+    if (!connection) return;
+
+    const annotation = this.annotations[connection.annotationIndex];
+    if (annotation) {
+      const info = `
+Annotation Details:
+- Modality: ${connection.modality}
+- Text: "${annotation.body.value.substring(0, 50)}${annotation.body.value.length > 50 ? '...' : ''}"
+- Canvas: ${annotation.target.canvasLabel || 'Unknown'}
+- Created: ${new Date(annotation.created).toLocaleString()}
+      `.trim();
+
+      alert(info);
+    }
+
+    this.hideConnectionMenu();
+  }
+
+  deleteConnection(connectionIndex) {
+    const connection = this.connections[connectionIndex];
+    if (!connection) return;
+
+    // Remove visual elements
+    if (connection.path) connection.path.remove();
+    if (connection.label) connection.label.remove();
+
+    // Remove from connections array
+    this.connections.splice(connectionIndex, 1);
+
+    // Remove annotation
+    if (connection.annotationIndex !== undefined) {
+      this.annotations.splice(connection.annotationIndex, 1);
+    }
+
+    this.hideConnectionMenu();
+    this.updateStatus('Connection deleted');
   }
 
   createAnnotation() {
@@ -1269,28 +1774,23 @@ export class IIIFInterimAnnotator extends HTMLElement {
   initializePanels() {
     // Initialize with default panels if no panels are defined
     if (this.panels.length === 0) {
-      // Text panel with sample text
+      // Text panel with PAGE XML transcriptions (Transkribus)
       this.addPanel('text', {
-        label: 'Text',
-        text: `Raphael's "School of Athens" is one of the most famous frescoes of the Renaissance period. Painted between 1509 and 1511, it represents philosophy and depicts many ancient Greek philosophers.
-
-The central figures are Plato and Aristotle. Plato points upward to the heavens, representing his theory of Forms, while Aristotle gestures toward the earth, emphasizing empirical knowledge and ethics.
-
-The fresco demonstrates Raphael's mastery of perspective and his ability to organize numerous figures in a coherent architectural space. The architecture itself, with its coffered barrel vault, represents the classical ideal.
-
-Among the other philosophers depicted are Socrates, Pythagoras, Euclid, and Ptolemy. Some scholars believe that Raphael included portraits of his contemporaries, including Leonardo da Vinci as Plato and Michelangelo as Heraclitus.`
+        label: 'Transcription',
+        mets: '/examples/mets.xml',
+        pagexml: '/examples/page/0018_00018.xml' // Load page 18 as default (page with content)
       });
 
-      // Facsimile panel with IIIF manuscript
+      // Facsimile panel with IIIF manuscript (Quaderno Raimondi - Università di Bologna)
       this.addPanel('facsimile', {
         label: 'Facsimile',
-        tileSources: 'https://iiif.bodleian.ox.ac.uk/iiif/image/b5994701-fcda-4d33-b0a1-ca82c2c9e70b'
+        manifest: 'https://dl.ficlit.unibo.it/iiif/2/19266/manifest'
       });
 
-      // Image panel with IIIF painting
+      // Image panel with Europeana manifest
       this.addPanel('image', {
         label: 'Painting',
-        tileSources: 'https://iiif.bodleian.ox.ac.uk/iiif/image/fd20bca8-c608-41e5-a794-f2cffc78f6db'
+        manifest: 'https://iiif.europeana.eu/presentation/366/item_7PWBIM2OZFXYT5ZC5Y7IFXBZSNB7TOZ6/manifest'
       });
     }
   }
@@ -1304,6 +1804,20 @@ Among the other philosophers depicted are Socrates, Pythagoras, Euclid, and Ptol
 
   closeAddPanelModal() {
     const modal = this.shadowRoot.getElementById('add-panel-modal');
+    const overlay = this.shadowRoot.getElementById('modal-overlay');
+    modal.classList.remove('active');
+    overlay.classList.remove('active');
+  }
+
+  openAboutModal() {
+    const modal = this.shadowRoot.getElementById('about-modal');
+    const overlay = this.shadowRoot.getElementById('modal-overlay');
+    modal.classList.add('active');
+    overlay.classList.add('active');
+  }
+
+  closeAboutModal() {
+    const modal = this.shadowRoot.getElementById('about-modal');
     const overlay = this.shadowRoot.getElementById('modal-overlay');
     modal.classList.remove('active');
     overlay.classList.remove('active');
@@ -1462,6 +1976,12 @@ Among the other philosophers depicted are Socrates, Pythagoras, Euclid, and Ptol
       if (config.src) {
         panel.setAttribute('src', config.src);
       }
+      if (config.mets) {
+        panel.setAttribute('mets', config.mets);
+      }
+      if (config.pagexml) {
+        panel.setAttribute('pagexml', config.pagexml);
+      }
       return panel;
     } else if (type === 'image' || type === 'facsimile') {
       const panel = document.createElement('iiif-image-panel');
@@ -1471,6 +1991,8 @@ Among the other philosophers depicted are Socrates, Pythagoras, Euclid, and Ptol
       if (config.manifest) {
         panel.setAttribute('manifest', config.manifest);
       }
+      // Set panel-type attribute so the panel knows what it is
+      panel.setAttribute('panel-type', type);
       return panel;
     }
 

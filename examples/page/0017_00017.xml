@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15 http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15/pagecontent.xsd">
+    <Metadata>
+        <Creator>Transkribus</Creator>
+        <Created>2025-06-30T10:50:13.219+02:00</Created>
+        <LastChange>2025-09-15T12:07:28.895+02:00</LastChange>
+        <TranskribusMetadata docId="9295937" pageId="99740836" pageNr="17" tsid="255588640" status="FINAL" userId="189085" imgUrl="https://files.transkribus.eu/Get?fileType=view&amp;id=WITUACDIRXMOLLCTIHKLATVF" xmlUrl="https://files.transkribus.eu/Get?id=BQABCFTMDOIGQCRMCTEKBSQY" imageId="83671041"/>
+    </Metadata>
+    <Page imageFilename="0017_00017.jpg" imageWidth="1798" imageHeight="2516">
+        <ReadingOrder>
+            <OrderedGroup id="ro_1766944743068" caption="Regions reading order">
+                <RegionRefIndexed index="0" regionRef="tr_2"/>
+            </OrderedGroup>
+        </ReadingOrder>
+        <TextRegion orientation="0.0" id="tr_2" custom="readingOrder {index:0;}">
+            <Coords points="137,263 128,2057 1584,2057 1581,265"/>
+            <TextLine id="l" custom="readingOrder {index:0;}">
+                <Coords points="144,307 166,308 185,308 185,278 167,278 146,277"/>
+                <Baseline points="144,307 166,308 185,308"/>
+                <TextEquiv>
+                    <Unicode>3.</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_1" custom="readingOrder {index:1;} textStyle {offset:0; length:89;underlined}">
+                <Coords points="140,541 210,541 281,537 352,534 423,535 494,535 564,537 635,536 706,536 777,533 848,533 918,534 989,535 1060,535 1131,537 1202,535 1272,532 1343,531 1414,534 1485,535 1556,531 1556,486 1485,490 1414,489 1343,486 1272,487 1202,490 1131,492 1060,490 989,490 918,489 848,488 777,488 706,491 635,491 564,492 494,490 423,490 352,489 281,492 210,496 140,496"/>
+                <Baseline points="140,526 210,526 281,522 352,519 423,520 494,520 564,522 635,521 706,521 777,518 848,518 918,519 989,520 1060,520 1131,522 1202,520 1272,517 1343,516 1414,519 1485,520 1556,516"/>
+                <TextEquiv>
+                    <Unicode>in uno stato di massima tensione, sia mentale che fisica, fino alla sua morte avvenuta in</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_2" custom="readingOrder {index:2;} textStyle {offset:0; length:82;underlined}">
+                <Coords points="132,611 203,611 274,613 346,611 417,609 489,609 560,607 631,609 703,609 774,611 846,615 917,613 988,613 1060,612 1131,612 1203,611 1274,611 1345,611 1417,611 1488,609 1560,609 1560,564 1488,564 1417,566 1345,566 1274,566 1203,566 1131,567 1060,567 988,568 917,568 846,570 774,566 703,564 631,564 560,562 489,564 417,564 346,566 274,568 203,566 132,566"/>
+                <Baseline points="132,596 203,596 274,598 346,596 417,594 489,594 560,592 631,594 703,594 774,596 846,600 917,598 988,598 1060,597 1131,597 1203,596 1274,596 1345,596 1417,596 1488,594 1560,594"/>
+                <TextEquiv>
+                    <Unicode>un incidente automobilistico nel 1956. Fino ad allora Pollock non aveva subito in-</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_3" custom="readingOrder {index:3;} textStyle {offset:0; length:82;underlined}">
+                <Coords points="134,689 204,689 275,690 345,691 416,689 487,689 557,687 628,688 698,689 769,687 840,688 910,687 981,687 1051,685 1122,683 1193,683 1263,683 1334,683 1404,684 1475,685 1546,689 1546,644 1475,640 1404,639 1334,638 1263,638 1193,638 1122,638 1051,640 981,642 910,642 840,643 769,642 698,644 628,643 557,642 487,644 416,644 345,646 275,645 204,644 134,644"/>
+                <Baseline points="134,674 204,674 275,675 345,676 416,674 487,674 557,672 628,673 698,674 769,672 840,673 910,672 981,672 1051,670 1122,668 1193,668 1263,668 1334,668 1404,669 1475,670 1546,674"/>
+                <TextEquiv>
+                    <Unicode>cidenti ma era vissuto per lungo tempo sull'orlo della violenza e della catastrofe". </Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_4" custom="readingOrder {index:4;}">
+                <Coords points="132,761 203,763 274,762 345,763 416,763 487,763 558,761 629,761 700,761 771,763 843,763 914,763 985,764 1056,761 1127,759 1198,758 1269,759 1340,760 1411,761 1482,761 1554,761 1554,716 1482,716 1411,716 1340,715 1269,714 1198,713 1127,714 1056,716 985,719 914,718 843,718 771,718 700,716 629,716 558,716 487,718 416,718 345,718 274,717 203,718 132,716"/>
+                <Baseline points="132,746 203,748 274,747 345,748 416,748 487,748 558,746 629,746 700,746 771,748 843,748 914,748 985,749 1056,746 1127,744 1198,743 1269,744 1340,745 1411,746 1482,746 1554,746"/>
+                <TextEquiv>
+                    <Unicode>Basta pensare ai suoi metodi di lavoro, alla sua tecnica, diciamo così, che rasentano il gesto, </Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_5" custom="readingOrder {index:5;}">
+                <Coords points="128,843 200,841 272,843 344,843 416,841 488,841 560,844 632,843 704,843 776,841 848,841 920,841 992,839 1064,837 1136,839 1208,837 1280,839 1352,839 1424,841 1496,841 1568,841 1568,796 1496,796 1424,796 1352,794 1280,794 1208,792 1136,794 1064,792 992,794 920,796 848,796 776,796 704,798 632,798 560,799 488,796 416,796 344,798 272,798 200,796 128,798"/>
+                <Baseline points="128,828 200,826 272,828 344,828 416,826 488,826 560,829 632,828 704,828 776,826 848,826 920,826 992,824 1041,838 1058,845 1080,829 1136,824 1208,822 1280,824 1352,824 1424,826 1496,826 1568,826"/>
+                <TextEquiv>
+                    <Unicode>la pratica rituale, l'esorcismo, e quindi, in un certo senso, la "bestemmia" lirica ed umana, come</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_6" custom="readingOrder {index:6;}">
+                <Coords points="132,913 202,916 273,917 344,917 415,915 486,913 556,915 627,913 698,913 769,909 840,909 910,909 981,911 1052,911 1123,907 1194,912 1264,911 1335,911 1406,909 1477,913 1548,913 1548,868 1477,868 1406,864 1335,866 1264,866 1194,867 1123,862 1052,866 981,866 910,864 840,864 769,864 698,868 627,868 556,870 486,868 415,870 344,872 273,872 202,871 132,868"/>
+                <Baseline points="132,898 202,901 273,902 344,902 415,900 486,898 556,900 627,898 698,898 769,894 840,894 910,894 981,896 1052,896 1123,892 1194,897 1264,896 1335,896 1406,894 1477,898 1548,898"/>
+                <TextEquiv>
+                    <Unicode>erano stati affrontati dallo spirito di Rimbaud. Tutta, o quasi tutta, la pittura di Pollock, va intesa</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_7" custom="readingOrder {index:7;}">
+                <Coords points="138,991 208,993 279,992 350,991 421,991 492,989 562,987 633,986 704,985 775,987 846,987 916,987 987,989 1058,987 1129,987 1200,985 1270,985 1341,985 1412,987 1483,987 1554,987 1554,942 1483,942 1412,942 1341,940 1270,940 1200,940 1129,942 1058,942 987,944 916,942 846,942 775,942 704,940 633,941 562,942 492,944 421,946 350,946 279,947 208,948 138,946"/>
+                <Baseline points="138,976 208,978 279,977 350,976 421,976 492,974 562,972 633,971 704,970 775,972 846,972 916,972 987,974 1058,972 1129,972 1200,970 1270,970 1341,970 1412,972 1483,972 1554,972"/>
+                <TextEquiv>
+                    <Unicode>come una negazione fanatica della realtà, della verità di natura. Così l'impiego, come strumenti, in </Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_8" custom="readingOrder {index:8;}">
+                <Coords points="138,1065 208,1068 279,1067 349,1067 420,1068 490,1068 561,1067 631,1067 702,1069 772,1067 843,1067 913,1069 984,1069 1054,1067 1125,1065 1195,1065 1266,1063 1336,1065 1407,1065 1477,1065 1548,1061 1548,1016 1477,1020 1407,1020 1336,1020 1266,1018 1195,1020 1125,1020 1054,1022 984,1024 913,1024 843,1022 772,1022 702,1024 631,1022 561,1022 490,1023 420,1023 349,1022 279,1022 208,1023 138,1020"/>
+                <Baseline points="138,1050 208,1053 279,1052 349,1052 420,1053 490,1053 561,1052 631,1052 702,1054 772,1052 843,1052 913,1054 984,1054 1054,1052 1125,1050 1195,1050 1266,1048 1336,1050 1407,1050 1477,1050 1548,1046"/>
+                <TextEquiv>
+                    <Unicode>luogo dei pennelli, atavicamente concepiti come prolungamento della mano dell'artista, degli oggetti</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_9" custom="readingOrder {index:9;}">
+                <Coords points="142,1145 211,1143 280,1145 349,1143 419,1143 488,1143 557,1142 627,1143 696,1140 765,1139 835,1139 904,1139 973,1140 1042,1139 1112,1143 1181,1145 1250,1142 1320,1141 1389,1143 1458,1142 1528,1141 1528,1096 1458,1097 1389,1098 1320,1096 1250,1097 1181,1100 1112,1098 1042,1094 973,1095 904,1094 835,1094 765,1094 696,1095 627,1098 557,1097 488,1098 419,1098 349,1098 280,1100 211,1098 142,1100"/>
+                <Baseline points="142,1130 211,1128 280,1130 349,1128 419,1128 488,1128 557,1127 627,1128 696,1125 765,1124 835,1124 904,1124 973,1125 1042,1124 1112,1128 1181,1130 1250,1127 1320,1126 1389,1128 1458,1127 1528,1126"/>
+                <TextEquiv>
+                    <Unicode>più disparati: bastoni, cenci, barattoli di latta bucati nel fondo, e da cui colava, come in una</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_10" custom="readingOrder {index:10;} textStyle {offset:61; length:10;underlined}">
+                <Coords points="130,1225 200,1225 271,1225 342,1221 413,1219 484,1217 554,1217 625,1217 696,1217 767,1217 838,1217 908,1217 979,1217 1050,1217 1121,1214 1192,1215 1262,1217 1333,1217 1404,1219 1475,1219 1546,1217 1546,1172 1475,1174 1404,1174 1333,1172 1262,1172 1192,1170 1121,1169 1050,1172 979,1172 908,1172 838,1172 767,1172 696,1172 625,1172 554,1172 484,1172 413,1174 342,1176 271,1180 200,1180 130,1180"/>
+                <Baseline points="130,1210 200,1210 271,1210 342,1206 413,1204 484,1202 554,1202 625,1202 696,1202 767,1202 838,1202 908,1202 979,1202 1050,1202 1121,1199 1192,1200 1262,1202 1333,1202 1404,1204 1475,1204 1546,1202"/>
+                <TextEquiv>
+                    <Unicode>maledizione, un colore violento, con cui ricopriva, solcava, imbrattava i suoi cartoni, fogli di </Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_11" custom="readingOrder {index:11;}">
+                <Coords points="136,1289 206,1296 277,1298 348,1295 419,1293 490,1293 560,1293 631,1292 702,1289 773,1291 844,1293 914,1295 985,1296 1056,1295 1127,1297 1198,1295 1268,1293 1339,1295 1410,1294 1481,1291 1552,1293 1552,1248 1481,1246 1410,1249 1339,1250 1268,1248 1198,1250 1127,1252 1056,1250 985,1251 914,1250 844,1248 773,1246 702,1244 631,1247 560,1248 490,1248 419,1248 348,1250 277,1253 206,1251 136,1244"/>
+                <Baseline points="136,1274 206,1281 277,1283 348,1280 419,1278 490,1278 560,1278 631,1277 702,1274 773,1276 844,1278 914,1280 985,1281 1056,1280 1127,1282 1198,1280 1268,1278 1339,1280 1410,1279 1481,1276 1552,1278"/>
+                <TextEquiv>
+                    <Unicode>compensato e tele, distesi per terra. Divenivano pavimenti, tappeti sinistri di poesia, di urlo, </Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="l_2" custom="readingOrder {index:12;} textStyle {offset:64; length:5;strikethrough}">
+                <Coords points="1158,1370 1139,1369 1067,1368 996,1367 924,1369 853,1369 781,1371 710,1372 638,1371 567,1373 495,1371 424,1371 352,1371 281,1371 209,1373 138,1373 138,1328 209,1328 281,1326 352,1326 424,1326 495,1326 567,1328 638,1326 710,1327 781,1326 853,1324 924,1324 996,1322 1067,1323 1139,1324 1158,1325"/>
+                <Baseline points="138,1358 209,1358 281,1356 352,1356 424,1356 495,1356 567,1358 638,1356 710,1357 781,1356 853,1354 924,1354 996,1352 1067,1353 1139,1354 1158,1355"/>
+                <TextEquiv>
+                    <Unicode>di grido, come espressione della poesia più atroce che il cuore umano</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="l_44" custom="readingOrder {index:13;}">
+                <Coords points="1033,1325 1065,1329 1091,1329 1123,1331 1154,1331 1166,1329 1162,1299 1152,1301 1124,1301 1092,1299 1067,1299 1036,1296"/>
+                <Baseline points="1033,1325 1065,1329 1091,1329 1123,1331 1154,1331 1166,1329"/>
+                <TextEquiv>
+                    <Unicode>d'uomo</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="l_1" custom="readingOrder {index:14;}">
+                <Coords points="1158,1325 1210,1326 1282,1326 1353,1326 1425,1324 1496,1323 1568,1326 1568,1371 1496,1368 1425,1369 1353,1371 1282,1371 1210,1371 1158,1370"/>
+                <Baseline points="1158,1355 1210,1356 1282,1356 1353,1356 1425,1354 1496,1353 1568,1356"/>
+                <TextEquiv>
+                    <Unicode>possa contenere. I colori violen-</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_13" custom="readingOrder {index:15;}">
+                <Coords points="132,1451 204,1451 276,1453 348,1451 420,1449 493,1445 565,1447 637,1445 709,1447 781,1445 854,1445 926,1443 998,1442 1070,1443 1142,1442 1215,1443 1287,1443 1359,1443 1431,1443 1503,1448 1576,1449 1576,1404 1503,1403 1431,1398 1359,1398 1287,1398 1215,1398 1142,1397 1070,1398 998,1397 926,1398 854,1400 781,1400 709,1402 637,1400 565,1402 493,1400 420,1404 348,1406 276,1408 204,1406 132,1406"/>
+                <Baseline points="132,1436 204,1436 276,1438 348,1436 420,1434 493,1430 565,1432 637,1430 709,1432 781,1430 854,1430 926,1428 998,1427 1070,1428 1142,1427 1215,1428 1287,1428 1359,1428 1431,1428 1503,1433 1576,1434"/>
+                <TextEquiv>
+                    <Unicode>ti della passione: il giallo, il rosso, il verde, confusi al nero del catrame, dell'asfalto. Da giovane, ave-</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_14" custom="readingOrder {index:16;}">
+                <Coords points="136,1521 208,1522 280,1525 352,1523 424,1523 496,1521 568,1519 640,1519 712,1519 784,1518 857,1517 929,1517 1001,1517 1073,1515 1145,1515 1217,1519 1289,1519 1361,1519 1433,1521 1505,1521 1578,1521 1578,1476 1505,1476 1433,1476 1361,1474 1289,1474 1217,1474 1145,1470 1073,1470 1001,1472 929,1472 857,1472 784,1473 712,1474 640,1474 568,1474 496,1476 424,1478 352,1478 280,1480 208,1477 136,1476"/>
+                <Baseline points="136,1506 208,1507 280,1510 352,1508 424,1508 496,1506 568,1504 640,1504 712,1504 784,1503 857,1502 929,1502 1001,1502 1073,1500 1145,1500 1217,1504 1289,1504 1361,1504 1433,1506 1505,1506 1578,1506"/>
+                <TextEquiv>
+                    <Unicode>va attraversato e percorso i territori del New Mexico, folgorato di stupore per le pitture rituali e stre-</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="l_4" custom="readingOrder {index:17;} textStyle {offset:76; length:5;strikethrough} unclear {offset:76; length:5;}">
+                <Coords points="1236,1596 1210,1595 1139,1593 1068,1595 997,1596 926,1595 856,1595 785,1593 714,1597 643,1596 572,1595 502,1595 431,1598 360,1597 289,1601 218,1601 148,1597 148,1552 218,1556 289,1556 360,1552 431,1553 502,1550 572,1550 643,1551 714,1552 785,1548 856,1550 926,1550 997,1551 1068,1550 1139,1548 1210,1550 1236,1551"/>
+                <Baseline points="148,1582 218,1586 289,1586 360,1582 431,1583 502,1580 572,1580 643,1581 714,1582 785,1578 856,1580 926,1580 997,1581 1068,1580 1139,1578 1210,1580 1236,1581"/>
+                <TextEquiv>
+                    <Unicode>gonesche che gli indiani Navaho compiono, spargendo terra colorata e sabbia &lt;???&gt;</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="l_60" custom="readingOrder {index:18;}">
+                <Coords points="1160,1548 1192,1548 1221,1546 1239,1546 1249,1546 1249,1516 1239,1516 1220,1516 1191,1518 1160,1518"/>
+                <Baseline points="1160,1548 1192,1548 1221,1546 1239,1546 1249,1546"/>
+                <TextEquiv>
+                    <Unicode>sulla </Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="l_3" custom="readingOrder {index:19;}">
+                <Coords points="1236,1551 1280,1552 1351,1554 1422,1551 1493,1552 1564,1556 1564,1601 1493,1597 1422,1596 1351,1599 1280,1597 1236,1596"/>
+                <Baseline points="1236,1581 1280,1582 1351,1584 1422,1581 1493,1582 1564,1586"/>
+                <TextEquiv>
+                    <Unicode>terra: pittura che, secondo</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_16" custom="readingOrder {index:20;}">
+                <Coords points="138,1675 210,1675 282,1677 354,1677 426,1677 499,1675 571,1674 643,1675 715,1673 787,1674 860,1673 932,1675 1004,1672 1076,1674 1148,1673 1221,1673 1293,1671 1365,1671 1437,1673 1509,1674 1582,1677 1582,1632 1509,1629 1437,1628 1365,1626 1293,1626 1221,1628 1148,1628 1076,1629 1004,1627 932,1630 860,1628 787,1629 715,1628 643,1630 571,1629 499,1630 426,1632 354,1632 282,1632 210,1630 138,1630"/>
+                <Baseline points="138,1660 210,1660 282,1662 354,1662 426,1662 499,1660 571,1659 643,1660 715,1658 787,1659 860,1658 932,1660 1004,1657 1076,1659 1148,1658 1221,1658 1293,1656 1365,1656 1437,1658 1509,1659 1582,1662"/>
+                <TextEquiv>
+                    <Unicode>la religione di quel popolo, devono vivere solo per un giorno, alla luce del sole, e che la notte farà scompa-</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_17" custom="readingOrder {index:21;}">
+                <Coords points="134,1748 206,1746 278,1745 350,1744 422,1747 494,1746 566,1747 638,1749 710,1744 782,1743 855,1742 927,1745 999,1750 1071,1748 1143,1748 1215,1746 1287,1746 1359,1744 1431,1744 1503,1743 1576,1746 1576,1710 1503,1707 1431,1708 1359,1708 1287,1710 1215,1710 1143,1712 1071,1712 999,1714 927,1709 855,1706 782,1707 710,1708 638,1713 566,1711 494,1710 422,1711 350,1708 278,1709 206,1710 134,1712"/>
+                <Baseline points="134,1736 206,1734 278,1733 350,1732 422,1735 494,1734 566,1735 638,1737 710,1732 782,1731 855,1730 927,1733 999,1738 1071,1736 1143,1736 1215,1734 1287,1734 1359,1732 1431,1732 1503,1731 1576,1734"/>
+                <TextEquiv>
+                    <Unicode>rure. L'America, evidentemente, sconta la sorte di tali incroci e deformazioni. Ma non può negarsi </Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="l_6" custom="readingOrder {index:22;}">
+                <Coords points="482,1822 427,1822 354,1820 282,1820 210,1820 138,1822 138,1792 210,1790 282,1790 354,1790 427,1792 482,1792"/>
+                <Baseline points="138,1812 210,1810 282,1810 354,1810 427,1812 482,1812"/>
+                <TextEquiv>
+                    <Unicode>che l'Europa intera, sia</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_18" custom="readingOrder {index:23;}">
+                <Coords points="472,1782 505,1782 538,1780 538,1750 505,1752 472,1752"/>
+                <Baseline points="472,1772 505,1772 538,1770"/>
+                <TextEquiv>
+                    <Unicode>pure </Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="l_8" custom="readingOrder {index:24;} textStyle {offset:19; length:8;strikethrough}">
+                <Coords points="855,1820 788,1818 716,1818 644,1818 571,1818 499,1822 482,1822 482,1792 499,1792 571,1788 644,1788 716,1788 788,1788 855,1790"/>
+                <Baseline points="482,1812 499,1812 571,1808 644,1808 716,1808 788,1808 855,1810"/>
+                <TextEquiv>
+                    <Unicode>coi suoi caratteri distinti</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_19" custom="readingOrder {index:25;}">
+                <Coords points="740,1790 767,1787 794,1787 821,1790 848,1790 876,1782 876,1752 848,1760 821,1760 794,1757 767,1757 740,1760"/>
+                <Baseline points="740,1780 767,1777 794,1777 821,1780 848,1780 876,1772"/>
+                <TextEquiv>
+                    <Unicode>tradizionali </Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="l_7" custom="readingOrder {index:26;}">
+                <Coords points="855,1790 861,1790 933,1788 1005,1788 1077,1788 1150,1788 1222,1788 1294,1786 1367,1788 1439,1790 1511,1790 1584,1790 1584,1820 1511,1820 1439,1820 1367,1818 1294,1816 1222,1818 1150,1818 1077,1818 1005,1818 933,1818 861,1820 855,1820"/>
+                <Baseline points="855,1810 861,1810 933,1808 1005,1808 1077,1808 1150,1808 1222,1808 1294,1806 1367,1808 1439,1810 1511,1810 1584,1810"/>
+                <TextEquiv>
+                    <Unicode>di civiltà, retta da un equilibrio diverso, non abbia</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_21" custom="readingOrder {index:27;}">
+                <Coords points="140,1901 211,1901 283,1901 355,1901 427,1897 499,1897 570,1895 642,1895 714,1895 786,1895 858,1895 929,1895 1001,1893 1073,1895 1145,1893 1217,1895 1288,1895 1360,1893 1432,1893 1504,1895 1576,1895 1576,1862 1504,1862 1432,1860 1360,1860 1288,1862 1217,1862 1145,1860 1073,1862 1001,1860 929,1862 858,1862 786,1862 714,1862 642,1862 570,1862 499,1864 427,1864 355,1868 283,1868 211,1868 140,1868"/>
+                <Baseline points="140,1890 211,1890 283,1890 355,1890 427,1886 499,1886 570,1884 642,1884 714,1884 786,1884 858,1884 929,1884 1001,1882 1073,1884 1145,1882 1217,1884 1288,1884 1360,1882 1432,1882 1504,1884 1576,1884"/>
+                <TextEquiv>
+                    <Unicode>in qualce modo avvertito il contraccolpo di codesto eccezionale avvenimento, di stravolgimento, </Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="l_9" custom="readingOrder {index:28;} textStyle {offset:87; length:6;strikethrough}">
+                <Coords points="1398,1970 1355,1970 1284,1970 1212,1972 1141,1972 1069,1973 998,1972 926,1972 855,1970 783,1972 712,1972 640,1972 569,1971 497,1972 426,1972 354,1972 283,1972 211,1975 140,1978 140,1948 211,1945 283,1942 354,1942 426,1942 497,1942 569,1941 640,1942 712,1942 783,1942 855,1940 926,1942 998,1942 1069,1943 1141,1942 1212,1942 1284,1940 1355,1940 1398,1940"/>
+                <Baseline points="140,1968 211,1965 283,1962 354,1962 426,1962 497,1962 569,1961 640,1962 712,1962 783,1962 855,1960 926,1962 998,1962 1069,1963 1141,1962 1212,1962 1284,1960 1355,1960 1397,1963 1422,1963 1450,1963 1474,1959"/>
+                <TextEquiv>
+                    <Unicode>quasi di terremoto dell'ordine dello spirito e della morale, che aveva ed ha avuto per centro</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_22" custom="readingOrder {index:29;}">
+                <Coords points="1380,1932 1408,1936 1436,1936 1464,1936 1492,1936 1492,1906 1464,1906 1436,1906 1408,1906 1380,1902"/>
+                <Baseline points="1380,1922 1408,1926 1436,1926 1464,1926 1492,1926"/>
+                <TextEquiv>
+                    <Unicode>epicentro</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="l_10" custom="readingOrder {index:30;}">
+                <Coords points="1481,1943 1498,1944 1570,1946 1570,1976 1498,1974 1481,1973"/>
+                <Baseline points="1481,1963 1498,1964 1570,1966"/>
+                <TextEquiv>
+                    <Unicode>l'Ame-</Unicode>
+                </TextEquiv>
+            </TextLine>
+            <TextLine id="tr_2_tl_24" custom="readingOrder {index:31;}">
+                <Coords points="134,2057 159,2057 184,2057 209,2057 234,2055 259,2054 284,2053 309,2053 334,2053 360,2053 360,2008 334,2008 309,2008 284,2008 259,2009 234,2010 209,2012 184,2012 159,2012 134,2012"/>
+                <Baseline points="134,2042 159,2042 184,2042 209,2042 234,2040 259,2039 284,2038 309,2038 334,2038 360,2038"/>
+                <TextEquiv>
+                    <Unicode>rica del nord. </Unicode>
+                </TextEquiv>
+            </TextLine>
+        </TextRegion>
+    </Page>
+</PcGts>
