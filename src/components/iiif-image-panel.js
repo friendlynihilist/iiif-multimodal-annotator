@@ -631,14 +631,15 @@ export class IIIFImagePanel extends HTMLElement {
     };
 
     if (this.drawingMode === 'freehand') {
-      // Check if close to starting point for snap
-      const snapDistance = 15; // pixels
+      // Check if close to starting point for snap (only after drawing enough points)
+      const snapDistance = 12; // pixels
+      const minPointsBeforeSnap = 40; // Require more points before allowing snap
       const distToStart = Math.sqrt(
         Math.pow(currentPoint.x - this.startPoint.x, 2) +
         Math.pow(currentPoint.y - this.startPoint.y, 2)
       );
 
-      if (distToStart < snapDistance && this.currentPath.length > 10) {
+      if (distToStart < snapDistance && this.currentPath.length > minPointsBeforeSnap) {
         // Snap to start point and mark as closed
         if (!this.pathClosed) {
           this.currentPath.push(this.startPoint);

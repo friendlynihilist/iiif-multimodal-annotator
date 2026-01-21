@@ -1307,21 +1307,30 @@ export class IIIFInterimAnnotator extends HTMLElement {
     const indicator = this.connectionIndicators.get(indicatorKey);
     indicator.connections.add(connection);
 
-    // Position the indicator near the right edge of the image box
+    // Calculate radius proportional to box size (5-8% of box height, min 6px, max 12px)
+    const boxHeight = imageBounds.height;
+    const radius = Math.max(6, Math.min(12, boxHeight * 0.06));
+    indicator.circle.setAttribute('r', radius);
+
+    // Position indicators inside the box perimeter, along the right edge
     // Stack vertically if multiple modalities for same image
     const modalityIndex = ['denotation', 'dynamisation', 'integration', 'transcription'].indexOf(modality);
-    const offsetY = modalityIndex * 20; // Stack indicators vertically
+    const spacing = radius * 2.5; // Spacing between indicators
+    const offsetY = modalityIndex * spacing;
 
-    const cx = imageBounds.right - containerBounds.left + 15;
-    const cy = imageBounds.top - containerBounds.top + imageBounds.height / 2 + offsetY;
+    // Position inside the box, near the right edge with some padding
+    const padding = radius + 3;
+    const cx = imageBounds.right - containerBounds.left - padding;
+    const cy = imageBounds.top - containerBounds.top + padding + offsetY;
 
     indicator.circle.setAttribute('cx', cx);
     indicator.circle.setAttribute('cy', cy);
 
-    // Update count
+    // Update count with font size proportional to circle
     const count = indicator.connections.size;
     indicator.text.setAttribute('x', cx);
     indicator.text.setAttribute('y', cy);
+    indicator.text.setAttribute('font-size', `${radius * 1.2}px`);
     indicator.text.textContent = count > 1 ? count : '';
 
     // Make indicator clickable
