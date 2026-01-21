@@ -4,6 +4,11 @@ import { resolve } from 'path';
 export default defineConfig({
   root: 'examples',
   publicDir: '../public',
+  resolve: {
+    alias: {
+      '/src': resolve(__dirname, 'src')
+    }
+  },
   build: {
     outDir: '../dist',
     emptyOutDir: true,
