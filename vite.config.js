@@ -2,10 +2,10 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
 export default defineConfig({
-  root: '.',
-  publicDir: 'public',
+  root: 'examples',
+  publicDir: '../public',
   build: {
-    outDir: 'dist',
+    outDir: '../dist',
     emptyOutDir: true,
     rollupOptions: {
       input: {
@@ -14,6 +14,6 @@ export default defineConfig({
     }
   },
   server: {
-    open: '/examples/index.html'
+    open: '/index.html'
   }
 });
