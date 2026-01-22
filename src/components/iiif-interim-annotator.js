@@ -569,10 +569,19 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
         .radial-menu-label {
           fill: var(--color-black);
-          font-size: 10px;
-          font-weight: 600;
+          font-size: 11px;
+          font-weight: 500;
           text-anchor: middle;
           dominant-baseline: central;
+          pointer-events: all;
+          font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }
+
+        .radial-menu-label-bg {
+          fill: var(--color-white);
+          stroke: var(--color-black);
+          stroke-width: 1;
+          opacity: 0.95;
           pointer-events: none;
         }
 
@@ -1507,22 +1516,51 @@ export class IIIFInterimAnnotator extends HTMLElement {
       line.setAttribute('y2', itemY);
       line.setAttribute('class', 'radial-menu-line');
 
-      // Add number label
-      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      label.setAttribute('x', itemX);
-      label.setAttribute('y', itemY);
-      label.setAttribute('class', 'radial-menu-label');
-      label.textContent = index + 1;
+      // Get text preview from connection (first 20 chars)
+      const textPreview = connection.textElement?.textContent?.trim().substring(0, 20) || `#${index + 1}`;
+      const labelText = textPreview.length === 20 ? textPreview + '...' : textPreview;
 
-      // Click handler
-      menuItem.addEventListener('click', (e) => {
+      // Create background rect for text label
+      const labelBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      labelBg.setAttribute('class', 'radial-menu-label-bg');
+      labelBg.setAttribute('rx', '3'); // Rounded corners
+
+      // Add text label with preview
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('class', 'radial-menu-label');
+      label.textContent = labelText;
+
+      // Position label offset from the circle
+      const labelOffset = 15; // Distance from circle
+      const labelX = itemX + Math.cos(angle) * labelOffset;
+      const labelY = itemY + Math.sin(angle) * labelOffset;
+
+      label.setAttribute('x', labelX);
+      label.setAttribute('y', labelY);
+
+      // Get text dimensions and position background
+      setTimeout(() => {
+        const bbox = label.getBBox();
+        labelBg.setAttribute('x', bbox.x - 3);
+        labelBg.setAttribute('y', bbox.y - 2);
+        labelBg.setAttribute('width', bbox.width + 6);
+        labelBg.setAttribute('height', bbox.height + 4);
+      }, 0);
+
+      // Click handler for both circle and label
+      const clickHandler = (e) => {
         e.stopPropagation();
         this.scrollToConnection(connection);
         this.hideRadialMenu();
-      });
+      };
+
+      menuItem.addEventListener('click', clickHandler);
+      label.style.cursor = 'pointer';
+      label.addEventListener('click', clickHandler);
 
       menuGroup.appendChild(line);
       menuGroup.appendChild(menuItem);
+      menuGroup.appendChild(labelBg);
       menuGroup.appendChild(label);
     });
 

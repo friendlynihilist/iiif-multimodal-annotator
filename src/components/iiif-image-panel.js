@@ -177,20 +177,10 @@ export class IIIFImagePanel extends HTMLElement {
           border: 2px solid #4CAF50;
           background: rgba(76, 175, 80, 0.3);
           z-index: 100;
-          cursor: grab;
+          cursor: default;
           transition: none;
-          pointer-events: auto;
+          pointer-events: none;
           will-change: transform;
-        }
-
-        .selection-rect.confirmed:hover {
-          border: 3px solid #388E3C;
-          background: rgba(56, 142, 60, 0.4);
-          box-shadow: none;
-        }
-
-        .selection-rect.confirmed:active {
-          cursor: grabbing;
         }
 
         /* Modality colors for image boxes */
@@ -231,22 +221,13 @@ export class IIIFImagePanel extends HTMLElement {
 
         /* SVG freehand paths */
         svg.confirmed {
-          cursor: grab;
-          pointer-events: auto;
+          cursor: default;
+          pointer-events: none;
           z-index: 100;
         }
 
-        svg.confirmed:active {
-          cursor: grabbing;
-        }
-
         svg.confirmed path {
-          pointer-events: all;
-          transition: stroke-width 0.2s ease;
-        }
-
-        svg.confirmed:hover path {
-          stroke-width: 3;
+          pointer-events: none;
         }
 
         /* Modality colors for SVG paths */
@@ -867,9 +848,13 @@ export class IIIFImagePanel extends HTMLElement {
           pathElement.setAttribute('stroke', '#4CAF50');
           pathElement.setAttribute('fill', 'rgba(76, 175, 80, 0.3)');
         }
-        // Enable pointer events for dragging
-        currentSelection.style.pointerEvents = 'auto';
+        // Disable pointer events - box is now read-only
+        currentSelection.style.pointerEvents = 'none';
       }
+
+      // Disable pointer events for all confirmed selections to prevent interference
+      currentSelection.style.pointerEvents = 'none';
+      currentSelection.style.cursor = 'default';
 
       this.confirmedRects.push({
         element: currentSelection,
