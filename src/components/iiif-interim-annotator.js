@@ -1405,16 +1405,16 @@ export class IIIFInterimAnnotator extends HTMLElement {
     const radius = Math.max(6, Math.min(12, boxHeight * 0.06));
     indicator.circle.setAttribute('r', radius);
 
-    // Position indicators inside the box perimeter, along the right edge
-    // Stack vertically if multiple modalities for same image
+    // Position indicators inside the box perimeter, along the top edge
+    // Stack horizontally if multiple modalities for same image
     const modalityIndex = ['denotation', 'dynamisation', 'integration', 'transcription'].indexOf(modality);
-    const spacing = radius * 2.5; // Spacing between indicators
-    const offsetY = modalityIndex * spacing;
+    const spacing = radius * 2.8; // Spacing between indicators
+    const offsetX = modalityIndex * spacing;
 
-    // Position inside the box, near the right edge with some padding
+    // Position inside the box, near the top-right corner with some padding
     const padding = radius + 3;
-    const cx = imageBounds.right - containerBounds.left - padding;
-    const cy = imageBounds.top - containerBounds.top + padding + offsetY;
+    const cx = imageBounds.right - containerBounds.left - padding - offsetX;
+    const cy = imageBounds.top - containerBounds.top + padding;
 
     indicator.circle.setAttribute('cx', cx);
     indicator.circle.setAttribute('cy', cy);
@@ -1428,25 +1428,22 @@ export class IIIFInterimAnnotator extends HTMLElement {
     indicator.text.setAttribute('font-size', `${radius * 1.2}px`);
     indicator.text.textContent = count > 1 ? count : '';
 
-    // Make indicator clickable and hoverable
+    // Make indicator clickable only (no auto-open on hover)
     if (!indicator.hitArea.hasAttribute('data-listener')) {
-      // Mouse enter - show radial menu if multiple connections
-      indicator.hitArea.addEventListener('mouseenter', (e) => {
-        const count = indicator.connections.size;
-        if (count > 1) {
-          this.showRadialMenu(indicator, e);
-        }
-      });
-
-      // Click - scroll to connection
       indicator.hitArea.addEventListener('click', (e) => {
         e.stopPropagation();
         const count = indicator.connections.size;
+
+        // Close any other open radial menu first
+        this.hideRadialMenu();
+
         if (count === 1) {
           // Single connection - scroll directly
           this.scrollToConnection(Array.from(indicator.connections)[0]);
+        } else {
+          // Multiple connections - show radial menu
+          this.showRadialMenu(indicator, e);
         }
-        // If multiple, radial menu is already shown by mouseenter
       });
 
       indicator.hitArea.setAttribute('data-listener', 'true');
