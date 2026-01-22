@@ -484,6 +484,8 @@ export class IIIFInterimAnnotator extends HTMLElement {
           cursor: pointer;
           pointer-events: all;
           transition: all 0.2s ease;
+          stroke: transparent;
+          stroke-width: 8;
         }
 
         .connection-indicator:hover {
@@ -510,8 +512,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
         /* Larger invisible hit area for indicators */
         .connection-indicator-hitarea {
           fill: transparent;
-          cursor: pointer;
-          pointer-events: all;
+          pointer-events: none;
         }
 
         .indicator-count {
@@ -1400,9 +1401,9 @@ export class IIIFInterimAnnotator extends HTMLElement {
     const indicator = this.connectionIndicators.get(indicatorKey);
     indicator.connections.add(connection);
 
-    // Calculate radius proportional to box size (12% of box height, min 12px, max 24px)
+    // Calculate radius proportional to box size (9% of box height, min 9px, max 18px)
     const boxHeight = imageBounds.height;
-    const radius = Math.max(12, Math.min(24, boxHeight * 0.12));
+    const radius = Math.max(9, Math.min(18, boxHeight * 0.09));
     indicator.circle.setAttribute('r', radius);
 
     // Position indicators inside the box perimeter, along the top edge
@@ -1429,8 +1430,8 @@ export class IIIFInterimAnnotator extends HTMLElement {
     indicator.text.textContent = count > 1 ? count : '';
 
     // Make indicator clickable only (no auto-open on hover)
-    if (!indicator.hitArea.hasAttribute('data-listener')) {
-      indicator.hitArea.addEventListener('click', (e) => {
+    if (!indicator.circle.hasAttribute('data-listener')) {
+      indicator.circle.addEventListener('click', (e) => {
         e.stopPropagation();
         const count = indicator.connections.size;
 
@@ -1446,7 +1447,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
         }
       });
 
-      indicator.hitArea.setAttribute('data-listener', 'true');
+      indicator.circle.setAttribute('data-listener', 'true');
     }
   }
 
