@@ -511,6 +511,71 @@ export class IIIFInterimAnnotator extends HTMLElement {
           pointer-events: none;
         }
 
+        /* Radial menu for multiple connections */
+        .radial-menu {
+          pointer-events: all;
+        }
+
+        .radial-menu-line {
+          stroke: var(--color-gray-700);
+          stroke-width: 1;
+          stroke-dasharray: 2,2;
+          pointer-events: none;
+        }
+
+        .radial-menu-item {
+          fill: var(--color-white);
+          stroke-width: 2;
+          transition: all 0.2s ease;
+          pointer-events: all;
+        }
+
+        .radial-menu-item.denotation {
+          stroke: #2196F3;
+        }
+
+        .radial-menu-item.dynamisation {
+          stroke: #FF5722;
+        }
+
+        .radial-menu-item.integration {
+          stroke: #9C27B0;
+        }
+
+        .radial-menu-item.transcription {
+          stroke: #4CAF50;
+        }
+
+        .radial-menu-item:hover {
+          transform: scale(1.3);
+          fill: currentColor;
+        }
+
+        .radial-menu-item.denotation:hover {
+          fill: #2196F3;
+        }
+
+        .radial-menu-item.dynamisation:hover {
+          fill: #FF5722;
+        }
+
+        .radial-menu-item.integration:hover {
+          fill: #9C27B0;
+        }
+
+        .radial-menu-item.transcription:hover {
+          fill: #4CAF50;
+        }
+
+        .radial-menu-label {
+          fill: var(--color-black);
+          font-size: 10px;
+          font-weight: 600;
+          text-anchor: middle;
+          dominant-baseline: central;
+          pointer-events: none;
+        }
+
         .modality-selector {
           position: fixed;
           background: var(--color-white);
@@ -1337,7 +1402,14 @@ export class IIIFInterimAnnotator extends HTMLElement {
     if (!indicator.circle.hasAttribute('data-listener')) {
       indicator.circle.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.scrollToFirstConnection(indicator);
+        const count = indicator.connections.size;
+        if (count === 1) {
+          // Single connection - scroll directly
+          this.scrollToConnection(Array.from(indicator.connections)[0]);
+        } else {
+          // Multiple connections - show radial menu
+          this.showRadialMenu(indicator, e);
+        }
       });
       indicator.circle.setAttribute('data-listener', 'true');
     }
@@ -1369,20 +1441,107 @@ export class IIIFInterimAnnotator extends HTMLElement {
     }
   }
 
-  scrollToFirstConnection(indicator) {
-    // Find the first connection in this indicator group
-    const firstConnection = Array.from(indicator.connections)[0];
-    if (!firstConnection || !firstConnection.textElement) return;
+  scrollToConnection(connection) {
+    if (!connection || !connection.textElement) return;
 
-    // Scroll the text element into view
-    const textPanel = firstConnection.textElement.closest('iiif-text-panel');
+    // Find the text panel containing this element
+    const textPanel = connection.textElement.getRootNode().host;
     if (textPanel && textPanel.shadowRoot) {
-      const textContainer = textPanel.shadowRoot.querySelector('.text-content');
+      const textContainer = textPanel.shadowRoot.querySelector('.text-area');
       if (textContainer) {
-        const elementTop = firstConnection.textElement.offsetTop;
-        textContainer.scrollTop = elementTop - 100; // Scroll with some offset from top
-        this.updateStatus(`Showing ${indicator.modality} connection (${indicator.connections.size} total)`);
+        const elementTop = connection.textElement.offsetTop;
+        const targetScroll = elementTop - 100; // Scroll with some offset from top
+
+        // Smooth scroll
+        textContainer.scrollTo({
+          top: targetScroll,
+          behavior: 'smooth'
+        });
+
+        this.updateStatus(`Scrolling to ${connection.modality} annotation`);
       }
+    }
+  }
+
+  showRadialMenu(indicator, event) {
+    // Hide any existing radial menu
+    this.hideRadialMenu();
+
+    const svg = this.shadowRoot.getElementById('connection-overlay');
+    if (!svg) return;
+
+    // Get click position (center of the clicked indicator)
+    const cx = parseFloat(indicator.circle.getAttribute('cx'));
+    const cy = parseFloat(indicator.circle.getAttribute('cy'));
+
+    // Create radial menu container
+    const menuGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    menuGroup.setAttribute('class', 'radial-menu');
+    menuGroup.setAttribute('id', 'radial-menu');
+
+    // Calculate positions for menu items in a circle
+    const connections = Array.from(indicator.connections);
+    const numItems = connections.length;
+    const menuRadius = 50; // Distance from center
+    const itemRadius = 8; // Size of each menu item
+
+    connections.forEach((connection, index) => {
+      // Calculate angle for this item (distributed evenly in a circle)
+      const angle = (index / numItems) * Math.PI * 2 - Math.PI / 2; // Start from top
+      const itemX = cx + Math.cos(angle) * menuRadius;
+      const itemY = cy + Math.sin(angle) * menuRadius;
+
+      // Create circle for this menu item
+      const menuItem = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      menuItem.setAttribute('cx', itemX);
+      menuItem.setAttribute('cy', itemY);
+      menuItem.setAttribute('r', itemRadius);
+      menuItem.setAttribute('class', `radial-menu-item ${indicator.modality}`);
+      menuItem.style.cursor = 'pointer';
+
+      // Add line connecting to center
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', cx);
+      line.setAttribute('y1', cy);
+      line.setAttribute('x2', itemX);
+      line.setAttribute('y2', itemY);
+      line.setAttribute('class', 'radial-menu-line');
+
+      // Add number label
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', itemX);
+      label.setAttribute('y', itemY);
+      label.setAttribute('class', 'radial-menu-label');
+      label.textContent = index + 1;
+
+      // Click handler
+      menuItem.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.scrollToConnection(connection);
+        this.hideRadialMenu();
+      });
+
+      menuGroup.appendChild(line);
+      menuGroup.appendChild(menuItem);
+      menuGroup.appendChild(label);
+    });
+
+    svg.appendChild(menuGroup);
+
+    // Close menu when clicking elsewhere
+    const closeHandler = (e) => {
+      if (!menuGroup.contains(e.target)) {
+        this.hideRadialMenu();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 10);
+  }
+
+  hideRadialMenu() {
+    const menu = this.shadowRoot.getElementById('radial-menu');
+    if (menu) {
+      menu.remove();
     }
   }
 
