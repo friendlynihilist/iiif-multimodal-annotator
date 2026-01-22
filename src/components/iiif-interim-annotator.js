@@ -1459,7 +1459,11 @@ export class IIIFInterimAnnotator extends HTMLElement {
       const textContainer = textPanel.shadowRoot.querySelector('.text-area');
       if (textContainer) {
         const elementTop = connection.textElement.offsetTop;
-        const targetScroll = elementTop - 100; // Scroll with some offset from top
+        const elementHeight = connection.textElement.offsetHeight;
+        const containerHeight = textContainer.clientHeight;
+
+        // Calculate scroll position to center the element
+        const targetScroll = elementTop - (containerHeight / 2) + (elementHeight / 2);
 
         // Smooth scroll
         textContainer.scrollTo({
