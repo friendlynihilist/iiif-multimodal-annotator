@@ -483,7 +483,12 @@ export class IIIFInterimAnnotator extends HTMLElement {
         .connection-indicator {
           cursor: pointer;
           pointer-events: all;
-          transition: opacity 0.3s ease;
+          transition: all 0.2s ease;
+        }
+
+        .connection-indicator:hover {
+          transform: scale(1.3);
+          filter: brightness(1.2);
         }
 
         .connection-indicator.denotation {
@@ -500,6 +505,13 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
         .connection-indicator.transcription {
           fill: #4CAF50;
+        }
+
+        /* Larger invisible hit area for indicators */
+        .connection-indicator-hitarea {
+          fill: transparent;
+          cursor: pointer;
+          pointer-events: all;
         }
 
         .indicator-count {
@@ -1356,6 +1368,11 @@ export class IIIFInterimAnnotator extends HTMLElement {
       const svg = this.shadowRoot.getElementById('connection-overlay');
       if (!svg) return;
 
+      // Create larger invisible hit area for easier clicking
+      const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      hitArea.setAttribute('class', 'connection-indicator-hitarea');
+      hitArea.setAttribute('r', '20'); // Much larger hit area
+
       // Create indicator circle
       const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       circle.setAttribute('class', `connection-indicator ${modality}`);
@@ -1365,10 +1382,12 @@ export class IIIFInterimAnnotator extends HTMLElement {
       const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       text.setAttribute('class', 'indicator-count');
 
+      svg.appendChild(hitArea);
       svg.appendChild(circle);
       svg.appendChild(text);
 
       this.connectionIndicators.set(indicatorKey, {
+        hitArea,
         circle,
         text,
         connections: new Set(),
@@ -1399,6 +1418,8 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     indicator.circle.setAttribute('cx', cx);
     indicator.circle.setAttribute('cy', cy);
+    indicator.hitArea.setAttribute('cx', cx);
+    indicator.hitArea.setAttribute('cy', cy);
 
     // Update count with font size proportional to circle
     const count = indicator.connections.size;
@@ -1407,20 +1428,28 @@ export class IIIFInterimAnnotator extends HTMLElement {
     indicator.text.setAttribute('font-size', `${radius * 1.2}px`);
     indicator.text.textContent = count > 1 ? count : '';
 
-    // Make indicator clickable
-    if (!indicator.circle.hasAttribute('data-listener')) {
-      indicator.circle.addEventListener('click', (e) => {
+    // Make indicator clickable and hoverable
+    if (!indicator.hitArea.hasAttribute('data-listener')) {
+      // Mouse enter - show radial menu if multiple connections
+      indicator.hitArea.addEventListener('mouseenter', (e) => {
+        const count = indicator.connections.size;
+        if (count > 1) {
+          this.showRadialMenu(indicator, e);
+        }
+      });
+
+      // Click - scroll to connection
+      indicator.hitArea.addEventListener('click', (e) => {
         e.stopPropagation();
         const count = indicator.connections.size;
         if (count === 1) {
           // Single connection - scroll directly
           this.scrollToConnection(Array.from(indicator.connections)[0]);
-        } else {
-          // Multiple connections - show radial menu
-          this.showRadialMenu(indicator, e);
         }
+        // If multiple, radial menu is already shown by mouseenter
       });
-      indicator.circle.setAttribute('data-listener', 'true');
+
+      indicator.hitArea.setAttribute('data-listener', 'true');
     }
   }
 
@@ -1440,6 +1469,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     // If no more connections in this group, remove the indicator
     if (indicator.connections.size === 0) {
+      indicator.hitArea.remove();
       indicator.circle.remove();
       indicator.text.remove();
       this.connectionIndicators.delete(indicatorKey);
@@ -1570,9 +1600,34 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     svg.appendChild(menuGroup);
 
+    // Store timeout for mouseleave
+    this.radialMenuTimeout = null;
+
+    // Auto-close menu when mouse leaves the menu area
+    const handleMouseLeave = () => {
+      this.radialMenuTimeout = setTimeout(() => {
+        this.hideRadialMenu();
+      }, 300); // Small delay to allow moving to menu items
+    };
+
+    // Cancel auto-close if mouse enters back into menu
+    const handleMouseEnter = () => {
+      if (this.radialMenuTimeout) {
+        clearTimeout(this.radialMenuTimeout);
+        this.radialMenuTimeout = null;
+      }
+    };
+
+    menuGroup.addEventListener('mouseleave', handleMouseLeave);
+    menuGroup.addEventListener('mouseenter', handleMouseEnter);
+
+    // Also setup mouseleave on the indicator
+    indicator.hitArea.addEventListener('mouseleave', handleMouseLeave);
+    indicator.hitArea.addEventListener('mouseenter', handleMouseEnter);
+
     // Close menu when clicking elsewhere
     const closeHandler = (e) => {
-      if (!menuGroup.contains(e.target)) {
+      if (!menuGroup.contains(e.target) && e.target !== indicator.hitArea) {
         this.hideRadialMenu();
         document.removeEventListener('click', closeHandler);
       }
