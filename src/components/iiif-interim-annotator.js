@@ -487,8 +487,8 @@ export class IIIFInterimAnnotator extends HTMLElement {
         }
 
         .connection-indicator:hover {
-          transform: scale(1.3);
-          filter: brightness(1.2);
+          filter: brightness(1.3);
+          opacity: 0.9;
         }
 
         .connection-indicator.denotation {
@@ -1371,7 +1371,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
       // Create larger invisible hit area for easier clicking
       const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       hitArea.setAttribute('class', 'connection-indicator-hitarea');
-      hitArea.setAttribute('r', '20'); // Much larger hit area
+      hitArea.setAttribute('r', '30'); // Much larger hit area for easy clicking
 
       // Create indicator circle
       const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -1400,9 +1400,9 @@ export class IIIFInterimAnnotator extends HTMLElement {
     const indicator = this.connectionIndicators.get(indicatorKey);
     indicator.connections.add(connection);
 
-    // Calculate radius proportional to box size (5-8% of box height, min 6px, max 12px)
+    // Calculate radius proportional to box size (12% of box height, min 12px, max 24px)
     const boxHeight = imageBounds.height;
-    const radius = Math.max(6, Math.min(12, boxHeight * 0.06));
+    const radius = Math.max(12, Math.min(24, boxHeight * 0.12));
     indicator.circle.setAttribute('r', radius);
 
     // Position indicators inside the box perimeter, along the top edge
