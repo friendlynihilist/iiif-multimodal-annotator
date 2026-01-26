@@ -240,20 +240,6 @@ export class IIIFTextPanel extends HTMLElement {
           cursor: not-allowed;
         }
 
-        #confirm-selection-btn:not(:disabled) {
-          background: #FFEB3B;
-          border-color: #FFEB3B;
-        }
-
-        #confirm-selection-btn:not(:disabled):hover {
-          background: #FDD835;
-          border-color: #FDD835;
-        }
-
-        #confirm-selection-btn:not(:disabled):hover svg {
-          stroke: var(--color-black);
-        }
-
         .info {
           font-size: 0.7rem;
           color: var(--color-gray-700);
@@ -317,35 +303,88 @@ export class IIIFTextPanel extends HTMLElement {
           stroke: var(--color-white);
         }
 
-        /* Comment form */
-        .comment-form {
+        /* Comment sidebar */
+        .comment-sidebar {
           position: fixed;
+          top: 0;
+          right: 0;
+          width: 350px;
+          height: 100vh;
           background: var(--color-white);
-          border: 2px solid var(--color-black);
-          padding: calc(var(--spacing-unit) * 2);
+          border-left: 2px solid var(--color-black);
           z-index: 10000;
-          min-width: 300px;
-          box-shadow: 4px 4px 0 rgba(0,0,0,0.1);
+          transform: translateX(100%);
+          transition: transform 0.3s ease;
+          display: flex;
+          flex-direction: column;
         }
 
-        .comment-form textarea {
+        .comment-sidebar.visible {
+          transform: translateX(0);
+        }
+
+        .comment-sidebar-header {
+          padding: calc(var(--spacing-unit) * 2);
+          border-bottom: 1px solid var(--color-gray-200);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-weight: 600;
+        }
+
+        .comment-sidebar-close {
+          width: 24px;
+          height: 24px;
+          border: 1px solid var(--color-black);
+          background: var(--color-white);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+        }
+
+        .comment-sidebar-close svg {
+          width: 14px;
+          height: 14px;
+          stroke: var(--color-black);
+          fill: none;
+          stroke-width: 1.5;
+        }
+
+        .comment-sidebar-close:hover {
+          background: var(--color-black);
+        }
+
+        .comment-sidebar-close:hover svg {
+          stroke: var(--color-white);
+        }
+
+        .comment-sidebar-content {
+          flex: 1;
+          padding: calc(var(--spacing-unit) * 2);
+          overflow-y: auto;
+        }
+
+        .comment-sidebar textarea {
           width: 100%;
-          min-height: 100px;
+          min-height: 150px;
           border: 1px solid var(--color-gray-200);
-          padding: calc(var(--spacing-unit) * 1);
+          padding: calc(var(--spacing-unit) * 1.5);
           font-family: inherit;
           font-size: 0.9rem;
           resize: vertical;
         }
 
-        .comment-form-buttons {
+        .comment-sidebar-buttons {
+          padding: calc(var(--spacing-unit) * 2);
+          border-top: 1px solid var(--color-gray-200);
           display: flex;
           gap: calc(var(--spacing-unit) * 1);
-          margin-top: calc(var(--spacing-unit) * 1);
           justify-content: flex-end;
         }
 
-        .comment-form button {
+        .comment-sidebar button {
           width: auto;
           padding: calc(var(--spacing-unit) * 1) calc(var(--spacing-unit) * 2);
         }
@@ -359,16 +398,6 @@ export class IIIFTextPanel extends HTMLElement {
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
             </svg>
           </label>
-          <button id="confirm-selection-btn" disabled title="Confirm text selection">
-            <svg viewBox="0 0 24 24">
-              <path d="M5 13l4 4L19 7"/>
-            </svg>
-          </button>
-          <button id="clear-selection-btn" title="Clear selection">
-            <svg viewBox="0 0 24 24">
-              <path d="M18 6L6 18M6 6l12 12"/>
-            </svg>
-          </button>
           <button id="clear-btn" title="Clear all text">
             <svg viewBox="0 0 24 24">
               <path d="M3 6h18M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
@@ -384,14 +413,10 @@ export class IIIFTextPanel extends HTMLElement {
   setupEventListeners() {
     const fileInput = this.shadowRoot.getElementById('file-input');
     const clearBtn = this.shadowRoot.getElementById('clear-btn');
-    const confirmSelectionBtn = this.shadowRoot.getElementById('confirm-selection-btn');
-    const clearSelectionBtn = this.shadowRoot.getElementById('clear-selection-btn');
     const textDisplay = this.shadowRoot.getElementById('text-display');
 
     fileInput.addEventListener('change', (e) => this.handleFileUpload(e));
     clearBtn.addEventListener('click', () => this.clearText());
-    confirmSelectionBtn.addEventListener('click', () => this.confirmTextSelection());
-    clearSelectionBtn.addEventListener('click', () => this.clearSelection());
 
     // Handle text selection
     textDisplay.addEventListener('mouseup', () => this.handleTextSelection());
@@ -511,31 +536,8 @@ export class IIIFTextPanel extends HTMLElement {
     // Clear the browser selection
     selection.removeAllRanges();
 
-    // Enable confirm button
-    const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
-    confirmBtn.disabled = false;
-
-    this.updateInfo(`Selected (yellow): "${selectedText.substring(0, 30)}${selectedText.length > 30 ? '...' : ''}"`);
-  }
-
-  confirmTextSelection() {
-    if (!this.currentSelection || !this.currentSelectionElement) {
-      return;
-    }
-
-    // Change highlight color from yellow to green
-    this.currentSelectionElement.className = 'text-confirmed';
-
-    // Store references
-    const savedSelection = this.currentSelection;
-    const savedElement = this.currentSelectionElement;
-
-    // Show annotation type selector
-    this.showAnnotationTypeSelector(savedElement, savedSelection);
-
-    // Disable confirm button
-    const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
-    confirmBtn.disabled = true;
+    // Show annotation type selector immediately
+    this.showAnnotationTypeSelector(mark, selectionData);
 
     this.updateInfo(`Choose annotation type`);
   }
@@ -600,11 +602,12 @@ export class IIIFTextPanel extends HTMLElement {
     }
 
     if (type === 'comment') {
-      this.showCommentForm(element, selection);
+      this.showCommentSidebar(element, selection);
     } else if (type === 'tag') {
       this.showTagForm(element, selection);
     } else if (type === 'link') {
-      // Use existing entity linking system
+      // Change to green and use existing entity linking system
+      element.className = 'text-confirmed';
       this.addToConfirmedElements(element, selection);
       this.dispatchEvent(new CustomEvent('text-confirmed', {
         detail: {
@@ -616,57 +619,91 @@ export class IIIFTextPanel extends HTMLElement {
         composed: true
       }));
       this.updateInfo(`Entity linking mode - Ready to connect`);
-    }
 
-    // Reset current selection
-    this.currentSelection = null;
-    this.currentSelectionElement = null;
+      // Reset current selection
+      this.currentSelection = null;
+      this.currentSelectionElement = null;
+    }
   }
 
-  showCommentForm(element, selection) {
-    // Create form positioned near the element
-    const form = document.createElement('div');
-    form.className = 'comment-form';
+  showCommentSidebar(element, selection) {
+    // Remove any existing sidebar
+    const existing = this.shadowRoot.querySelector('.comment-sidebar');
+    if (existing) existing.remove();
 
-    const rect = element.getBoundingClientRect();
-    const shadowRect = this.shadowRoot.host.getBoundingClientRect();
-    form.style.left = `${rect.left - shadowRect.left + 20}px`;
-    form.style.top = `${rect.bottom - shadowRect.top + 5}px`;
+    // Create sidebar
+    const sidebar = document.createElement('div');
+    sidebar.className = 'comment-sidebar';
 
-    form.innerHTML = `
-      <textarea placeholder="Enter your comment..."></textarea>
-      <div class="comment-form-buttons">
-        <button id="comment-cancel">Cancel</button>
-        <button id="comment-save">Save</button>
+    sidebar.innerHTML = `
+      <div class="comment-sidebar-header">
+        <span>Add Comment</span>
+        <button class="comment-sidebar-close">
+          <svg viewBox="0 0 24 24">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="comment-sidebar-content">
+        <textarea placeholder="Enter your comment..." id="text-comment-textarea"></textarea>
+      </div>
+      <div class="comment-sidebar-buttons">
+        <button id="text-comment-cancel">Cancel</button>
+        <button id="text-comment-save">Save</button>
       </div>
     `;
 
-    this.shadowRoot.appendChild(form);
+    this.shadowRoot.appendChild(sidebar);
 
-    const textarea = form.querySelector('textarea');
-    const cancelBtn = form.querySelector('#comment-cancel');
-    const saveBtn = form.querySelector('#comment-save');
+    // Trigger animation
+    setTimeout(() => sidebar.classList.add('visible'), 10);
+
+    const textarea = sidebar.querySelector('#text-comment-textarea');
+    const closeBtn = sidebar.querySelector('.comment-sidebar-close');
+    const cancelBtn = sidebar.querySelector('#text-comment-cancel');
+    const saveBtn = sidebar.querySelector('#text-comment-save');
 
     textarea.focus();
 
-    cancelBtn.addEventListener('click', () => {
-      form.remove();
-      // Remove the green highlight
+    const closeSidebar = () => {
+      sidebar.classList.remove('visible');
+      setTimeout(() => sidebar.remove(), 300);
+    };
+
+    closeBtn.addEventListener('click', () => {
+      closeSidebar();
+      // Remove the yellow highlight
       const parent = element.parentNode;
       const textNode = document.createTextNode(element.textContent);
       parent.replaceChild(textNode, element);
       parent.normalize();
-      this.updateInfo(`Comment cancelled`);
+      this.currentSelection = null;
+      this.currentSelectionElement = null;
+      this.updateInfo('Comment cancelled');
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      closeSidebar();
+      // Remove the yellow highlight
+      const parent = element.parentNode;
+      const textNode = document.createTextNode(element.textContent);
+      parent.replaceChild(textNode, element);
+      parent.normalize();
+      this.currentSelection = null;
+      this.currentSelectionElement = null;
+      this.updateInfo('Comment cancelled');
     });
 
     saveBtn.addEventListener('click', () => {
       const comment = textarea.value.trim();
       if (!comment) {
-        alert('Please enter a comment');
         return;
       }
 
-      form.remove();
+      closeSidebar();
+
+      // Change to green
+      element.className = 'text-confirmed';
 
       // Add to confirmed elements
       this.addToConfirmedElements(element, selection);
@@ -683,11 +720,18 @@ export class IIIFTextPanel extends HTMLElement {
         composed: true
       }));
 
-      this.updateInfo(`Comment saved: "${comment.substring(0, 30)}${comment.length > 30 ? '...' : ''}"`);
+      this.updateInfo(`Comment saved`);
+
+      // Reset current selection
+      this.currentSelection = null;
+      this.currentSelectionElement = null;
     });
   }
 
   showTagForm(element, selection) {
+    // Change to green
+    element.className = 'text-confirmed';
+
     // Placeholder for now
     this.addToConfirmedElements(element, selection);
 
@@ -703,6 +747,10 @@ export class IIIFTextPanel extends HTMLElement {
     }));
 
     this.updateInfo(`Tag annotation (placeholder)`);
+
+    // Reset current selection
+    this.currentSelection = null;
+    this.currentSelectionElement = null;
   }
 
   addToConfirmedElements(element, selection) {
@@ -732,9 +780,16 @@ export class IIIFTextPanel extends HTMLElement {
     this.currentSelection = null;
     this.currentSelectionElement = null;
 
-    // Disable confirm button
-    const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
-    confirmBtn.disabled = true;
+    // Remove any inline buttons
+    const selector = this.shadowRoot.querySelector('.annotation-type-selector');
+    if (selector) selector.remove();
+
+    // Remove any sidebar
+    const sidebar = this.shadowRoot.querySelector('.comment-sidebar');
+    if (sidebar) {
+      sidebar.classList.remove('visible');
+      setTimeout(() => sidebar.remove(), 300);
+    }
 
     this.updateInfo('Current selection cleared');
   }
