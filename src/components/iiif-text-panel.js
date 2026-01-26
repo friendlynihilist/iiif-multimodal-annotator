@@ -301,6 +301,22 @@ export class IIIFTextPanel extends HTMLElement {
           stroke: var(--color-white);
         }
 
+        .annotation-type-btn.delete {
+          border-color: #f44336;
+        }
+
+        .annotation-type-btn.delete svg {
+          stroke: #f44336;
+        }
+
+        .annotation-type-btn.delete:hover {
+          background: #f44336;
+        }
+
+        .annotation-type-btn.delete:hover svg {
+          stroke: var(--color-white);
+        }
+
         /* Comment form */
         .comment-form {
           position: fixed;
@@ -546,6 +562,11 @@ export class IIIFTextPanel extends HTMLElement {
           <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
         </svg>
       </button>
+      <button class="annotation-type-btn delete" data-type="delete" title="Delete selection">
+        <svg viewBox="0 0 24 24">
+          <path d="M3 6h18M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+        </svg>
+      </button>
     `;
 
     // Insert after the element
@@ -565,6 +586,18 @@ export class IIIFTextPanel extends HTMLElement {
   handleAnnotationType(type, element, selection, selector) {
     // Remove the selector buttons
     selector.remove();
+
+    if (type === 'delete') {
+      // Remove the element and clear selection
+      const parent = element.parentNode;
+      const textNode = document.createTextNode(element.textContent);
+      parent.replaceChild(textNode, element);
+      parent.normalize();
+      this.currentSelection = null;
+      this.currentSelectionElement = null;
+      this.updateInfo('Selection deleted');
+      return;
+    }
 
     if (type === 'comment') {
       this.showCommentForm(element, selection);

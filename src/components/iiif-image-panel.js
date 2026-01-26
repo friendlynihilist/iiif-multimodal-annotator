@@ -139,20 +139,6 @@ export class IIIFImagePanel extends HTMLElement {
           stroke: var(--color-white);
         }
 
-        #confirm-selection-btn:not(:disabled) {
-          background: #FFEB3B;
-          border-color: #FFEB3B;
-        }
-
-        #confirm-selection-btn:not(:disabled):hover {
-          background: #FDD835;
-          border-color: #FDD835;
-        }
-
-        #confirm-selection-btn:not(:disabled):hover svg {
-          stroke: var(--color-black);
-        }
-
         /* Floating annotation type selector */
         .annotation-type-selector-floating {
           position: absolute;
@@ -194,35 +180,104 @@ export class IIIFImagePanel extends HTMLElement {
           stroke: var(--color-white);
         }
 
-        /* Comment form */
-        .image-comment-form {
-          position: absolute;
-          background: var(--color-white);
-          border: 2px solid var(--color-black);
-          padding: calc(var(--spacing-unit) * 2);
-          z-index: 10000;
-          min-width: 300px;
-          box-shadow: 4px 4px 0 rgba(0,0,0,0.1);
+        .annotation-type-btn-floating.delete {
+          border-color: #f44336;
         }
 
-        .image-comment-form textarea {
+        .annotation-type-btn-floating.delete svg {
+          stroke: #f44336;
+        }
+
+        .annotation-type-btn-floating.delete:hover {
+          background: #f44336;
+        }
+
+        .annotation-type-btn-floating.delete:hover svg {
+          stroke: var(--color-white);
+        }
+
+        /* Comment sidebar */
+        .comment-sidebar {
+          position: absolute;
+          top: 0;
+          right: 0;
+          width: 350px;
+          height: 100%;
+          background: var(--color-white);
+          border-left: 2px solid var(--color-black);
+          z-index: 10000;
+          transform: translateX(100%);
+          transition: transform 0.3s ease;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .comment-sidebar.visible {
+          transform: translateX(0);
+        }
+
+        .comment-sidebar-header {
+          padding: calc(var(--spacing-unit) * 2);
+          border-bottom: 1px solid var(--color-gray-200);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-weight: 600;
+        }
+
+        .comment-sidebar-close {
+          width: 24px;
+          height: 24px;
+          border: 1px solid var(--color-black);
+          background: var(--color-white);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+        }
+
+        .comment-sidebar-close svg {
+          width: 14px;
+          height: 14px;
+          stroke: var(--color-black);
+          fill: none;
+          stroke-width: 1.5;
+        }
+
+        .comment-sidebar-close:hover {
+          background: var(--color-black);
+        }
+
+        .comment-sidebar-close:hover svg {
+          stroke: var(--color-white);
+        }
+
+        .comment-sidebar-content {
+          flex: 1;
+          padding: calc(var(--spacing-unit) * 2);
+          overflow-y: auto;
+        }
+
+        .comment-sidebar textarea {
           width: 100%;
-          min-height: 100px;
+          min-height: 150px;
           border: 1px solid var(--color-gray-200);
-          padding: calc(var(--spacing-unit) * 1);
+          padding: calc(var(--spacing-unit) * 1.5);
           font-family: inherit;
           font-size: 0.9rem;
           resize: vertical;
         }
 
-        .image-comment-form-buttons {
+        .comment-sidebar-buttons {
+          padding: calc(var(--spacing-unit) * 2);
+          border-top: 1px solid var(--color-gray-200);
           display: flex;
           gap: calc(var(--spacing-unit) * 1);
-          margin-top: calc(var(--spacing-unit) * 1);
           justify-content: flex-end;
         }
 
-        .image-comment-form button {
+        .comment-sidebar button {
           width: auto;
           padding: calc(var(--spacing-unit) * 1) calc(var(--spacing-unit) * 2);
         }
@@ -489,11 +544,6 @@ export class IIIFImagePanel extends HTMLElement {
               <path d="M18 6L6 18M6 6l12 12"/>
             </svg>
           </button>
-          <button id="confirm-selection-btn" disabled title="Confirm selection">
-            <svg viewBox="0 0 24 24">
-              <path d="M5 13l4 4L19 7"/>
-            </svg>
-          </button>
           <button class="toggle-metadata" id="toggle-metadata-btn" title="Show info">
             <svg viewBox="0 0 24 24">
               <circle cx="12" cy="12" r="10"/>
@@ -576,7 +626,6 @@ export class IIIFImagePanel extends HTMLElement {
     const selectBtn = this.shadowRoot.getElementById('select-btn');
     const drawingModeBtn = this.shadowRoot.getElementById('drawing-mode-btn');
     const clearSelectionBtn = this.shadowRoot.getElementById('clear-selection-btn');
-    const confirmSelectionBtn = this.shadowRoot.getElementById('confirm-selection-btn');
     const manifestInput = this.shadowRoot.getElementById('manifest-input');
     const prevBtn = this.shadowRoot.getElementById('prev-btn');
     const nextBtn = this.shadowRoot.getElementById('next-btn');
@@ -601,7 +650,6 @@ export class IIIFImagePanel extends HTMLElement {
     selectBtn.addEventListener('click', () => this.toggleSelectionMode());
     drawingModeBtn.addEventListener('click', () => this.toggleDrawingMode());
     clearSelectionBtn.addEventListener('click', () => this.clearSelection());
-    confirmSelectionBtn.addEventListener('click', () => this.confirmSelection());
 
     // Navigation buttons
     prevBtn.addEventListener('click', () => this.previousCanvas());
@@ -802,11 +850,16 @@ export class IIIFImagePanel extends HTMLElement {
         // Store selection data for later use
         this.currentSelectionData = selectionData;
 
-        // Enable confirm button
-        const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
-        confirmBtn.disabled = false;
+        // Show floating annotation selector immediately
+        const currentSelection = this.shadowRoot.getElementById('current-selection-rect');
+        if (currentSelection) {
+          const rect = currentSelection.getBoundingClientRect();
+          const container = this.shadowRoot.querySelector('.viewer-container');
+          const containerRect = container.getBoundingClientRect();
+          this.showFloatingAnnotationSelector(rect, containerRect);
+        }
 
-        this.updateInfo(`Freehand path drawn - Click confirm to proceed`);
+        this.updateInfo(`Freehand path drawn - Choose annotation type`);
       } else {
         this.updateInfo('Path too short - draw a longer path');
       }
@@ -866,11 +919,16 @@ export class IIIFImagePanel extends HTMLElement {
         // Store selection data for later use
         this.currentSelectionData = selectionData;
 
-        // Enable confirm button
-        const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
-        confirmBtn.disabled = false;
+        // Show floating annotation selector immediately
+        const currentSelection = this.shadowRoot.getElementById('current-selection-rect');
+        if (currentSelection) {
+          const rect = currentSelection.getBoundingClientRect();
+          const container = this.shadowRoot.querySelector('.viewer-container');
+          const containerRect = container.getBoundingClientRect();
+          this.showFloatingAnnotationSelector(rect, containerRect);
+        }
 
-        this.updateInfo(`Region selected: ${w}x${h} - Click confirm to proceed`);
+        this.updateInfo(`Region selected: ${w}x${h} - Choose annotation type`);
       }
     }
 
@@ -1021,16 +1079,15 @@ export class IIIFImagePanel extends HTMLElement {
     this.pathClosed = false;
     this.currentSelectionData = null;
 
-    // Disable confirm button
-    const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
-    if (confirmBtn) confirmBtn.disabled = true;
-
     // Remove any floating UI
     const floatingSelector = this.shadowRoot.querySelector('.annotation-type-selector-floating');
     if (floatingSelector) floatingSelector.remove();
 
-    const floatingForm = this.shadowRoot.querySelector('.image-comment-form');
-    if (floatingForm) floatingForm.remove();
+    const sidebar = this.shadowRoot.querySelector('.comment-sidebar');
+    if (sidebar) {
+      sidebar.classList.remove('visible');
+      setTimeout(() => sidebar.remove(), 300);
+    }
 
     this.updateInfo('Selection cleared');
   }
@@ -1490,28 +1547,6 @@ export class IIIFImagePanel extends HTMLElement {
     metadataContent.innerHTML = html || '<p>No metadata available</p>';
   }
 
-  confirmSelection() {
-    if (!this.currentSelectionData) return;
-
-    // Disable confirm button
-    const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
-    confirmBtn.disabled = true;
-
-    // Get the current selection element
-    const currentSelection = this.shadowRoot.getElementById('current-selection-rect');
-    if (!currentSelection) return;
-
-    // Calculate position for floating buttons
-    const rect = currentSelection.getBoundingClientRect();
-    const container = this.shadowRoot.querySelector('.viewer-container');
-    const containerRect = container.getBoundingClientRect();
-
-    // Show floating annotation type selector
-    this.showFloatingAnnotationSelector(rect, containerRect);
-
-    this.updateInfo('Choose annotation type');
-  }
-
   showFloatingAnnotationSelector(selectionRect, containerRect) {
     // Remove any existing selector
     const existing = this.shadowRoot.querySelector('.annotation-type-selector-floating');
@@ -1526,7 +1561,7 @@ export class IIIFImagePanel extends HTMLElement {
     selector.style.left = `${left}px`;
     selector.style.top = `${top}px`;
 
-    // Create three buttons with SVG icons
+    // Create four buttons with SVG icons
     selector.innerHTML = `
       <button class="annotation-type-btn-floating" data-type="comment" title="Free comment">
         <svg viewBox="0 0 24 24">
@@ -1543,6 +1578,11 @@ export class IIIFImagePanel extends HTMLElement {
         <svg viewBox="0 0 24 24">
           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
           <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+      </button>
+      <button class="annotation-type-btn-floating delete" data-type="delete" title="Delete selection">
+        <svg viewBox="0 0 24 24">
+          <path d="M3 6h18M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
         </svg>
       </button>
     `;
@@ -1567,9 +1607,17 @@ export class IIIFImagePanel extends HTMLElement {
 
     const selectionData = this.currentSelectionData;
 
+    if (type === 'delete') {
+      // Remove the current selection
+      this.clearCurrentSelectionRect();
+      this.currentSelectionData = null;
+      this.updateInfo('Selection deleted');
+      return;
+    }
+
     if (type === 'comment') {
-      // Show comment form
-      this.showImageCommentForm(selectionData);
+      // Show comment sidebar
+      this.showCommentSidebar(selectionData);
     } else if (type === 'tag') {
       // For tag, confirm the rectangle and create standalone annotation
       this.confirmCurrentRect();
@@ -1605,43 +1653,61 @@ export class IIIFImagePanel extends HTMLElement {
     }
   }
 
-  showImageCommentForm(selectionData) {
-    // Get current selection element for positioning
-    const currentSelection = this.shadowRoot.getElementById('current-selection-rect');
-    if (!currentSelection) return;
+  showCommentSidebar(selectionData) {
+    // Remove any existing sidebar
+    const existing = this.shadowRoot.querySelector('.comment-sidebar');
+    if (existing) existing.remove();
 
-    const rect = currentSelection.getBoundingClientRect();
     const container = this.shadowRoot.querySelector('.viewer-container');
-    const containerRect = container.getBoundingClientRect();
 
-    // Create form
-    const form = document.createElement('div');
-    form.className = 'image-comment-form';
+    // Create sidebar
+    const sidebar = document.createElement('div');
+    sidebar.className = 'comment-sidebar';
 
-    const left = rect.right - containerRect.left + 10;
-    const top = rect.top - containerRect.top;
-    form.style.left = `${left}px`;
-    form.style.top = `${top}px`;
-
-    form.innerHTML = `
-      <textarea placeholder="Enter your comment..."></textarea>
-      <div class="image-comment-form-buttons">
-        <button id="image-comment-cancel">Cancel</button>
-        <button id="image-comment-save">Save</button>
+    sidebar.innerHTML = `
+      <div class="comment-sidebar-header">
+        <span>Add Comment</span>
+        <button class="comment-sidebar-close">
+          <svg viewBox="0 0 24 24">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="comment-sidebar-content">
+        <textarea placeholder="Enter your comment..." id="comment-textarea"></textarea>
+      </div>
+      <div class="comment-sidebar-buttons">
+        <button id="sidebar-comment-cancel">Cancel</button>
+        <button id="sidebar-comment-save">Save</button>
       </div>
     `;
 
-    container.appendChild(form);
+    container.appendChild(sidebar);
 
-    const textarea = form.querySelector('textarea');
-    const cancelBtn = form.querySelector('#image-comment-cancel');
-    const saveBtn = form.querySelector('#image-comment-save');
+    // Trigger animation
+    setTimeout(() => sidebar.classList.add('visible'), 10);
+
+    const textarea = sidebar.querySelector('#comment-textarea');
+    const closeBtn = sidebar.querySelector('.comment-sidebar-close');
+    const cancelBtn = sidebar.querySelector('#sidebar-comment-cancel');
+    const saveBtn = sidebar.querySelector('#sidebar-comment-save');
 
     textarea.focus();
 
+    const closeSidebar = () => {
+      sidebar.classList.remove('visible');
+      setTimeout(() => sidebar.remove(), 300);
+    };
+
+    closeBtn.addEventListener('click', () => {
+      closeSidebar();
+      this.clearCurrentSelectionRect();
+      this.currentSelectionData = null;
+      this.updateInfo('Comment cancelled');
+    });
+
     cancelBtn.addEventListener('click', () => {
-      form.remove();
-      // Clear the current selection
+      closeSidebar();
       this.clearCurrentSelectionRect();
       this.currentSelectionData = null;
       this.updateInfo('Comment cancelled');
@@ -1650,11 +1716,10 @@ export class IIIFImagePanel extends HTMLElement {
     saveBtn.addEventListener('click', () => {
       const comment = textarea.value.trim();
       if (!comment) {
-        alert('Please enter a comment');
         return;
       }
 
-      form.remove();
+      closeSidebar();
 
       // Confirm the rectangle
       this.confirmCurrentRect();
@@ -1675,7 +1740,7 @@ export class IIIFImagePanel extends HTMLElement {
         composed: true
       }));
 
-      this.updateInfo(`Comment saved: "${comment.substring(0, 30)}${comment.length > 30 ? '...' : ''}"`);
+      this.updateInfo(`Comment saved`);
       this.currentSelectionData = null;
     });
   }
