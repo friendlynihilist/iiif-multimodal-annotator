@@ -281,14 +281,24 @@ export class IIIFTextPanel extends HTMLElement {
           align-items: center;
           justify-content: center;
           transition: all 0.2s ease;
-          font-size: 14px;
           padding: 0;
+        }
+
+        .annotation-type-btn svg {
+          width: 14px;
+          height: 14px;
+          stroke: var(--color-black);
+          fill: none;
+          stroke-width: 1.5;
         }
 
         .annotation-type-btn:hover {
           background: var(--color-black);
-          color: var(--color-white);
           transform: scale(1.1);
+        }
+
+        .annotation-type-btn:hover svg {
+          stroke: var(--color-white);
         }
 
         /* Comment form */
@@ -511,7 +521,7 @@ export class IIIFTextPanel extends HTMLElement {
     const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
     confirmBtn.disabled = true;
 
-    this.updateInfo(`Choose annotation type: 💬 Comment, 🏷️ Tag, or 🔗 Link`);
+    this.updateInfo(`Choose annotation type`);
   }
 
   showAnnotationTypeSelector(element, selection) {
@@ -519,9 +529,23 @@ export class IIIFTextPanel extends HTMLElement {
     const selector = document.createElement('span');
     selector.className = 'annotation-type-selector';
     selector.innerHTML = `
-      <button class="annotation-type-btn" data-type="comment" title="Free comment">💬</button>
-      <button class="annotation-type-btn" data-type="tag" title="Tag">🏷️</button>
-      <button class="annotation-type-btn" data-type="link" title="Entity linking">🔗</button>
+      <button class="annotation-type-btn" data-type="comment" title="Free comment">
+        <svg viewBox="0 0 24 24">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+      </button>
+      <button class="annotation-type-btn" data-type="tag" title="Tag">
+        <svg viewBox="0 0 24 24">
+          <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+          <circle cx="7" cy="7" r="1"/>
+        </svg>
+      </button>
+      <button class="annotation-type-btn" data-type="link" title="Entity linking">
+        <svg viewBox="0 0 24 24">
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+      </button>
     `;
 
     // Insert after the element

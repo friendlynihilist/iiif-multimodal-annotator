@@ -139,26 +139,92 @@ export class IIIFImagePanel extends HTMLElement {
           stroke: var(--color-white);
         }
 
-        /* Annotation type buttons with emoji */
-        #annotate-comment-btn,
-        #annotate-tag-btn,
-        #annotate-link-btn {
-          font-size: 16px;
-          line-height: 1;
-        }
-
-        #annotate-comment-btn:not(:disabled),
-        #annotate-tag-btn:not(:disabled),
-        #annotate-link-btn:not(:disabled) {
+        #confirm-selection-btn:not(:disabled) {
           background: #FFEB3B;
           border-color: #FFEB3B;
         }
 
-        #annotate-comment-btn:not(:disabled):hover,
-        #annotate-tag-btn:not(:disabled):hover,
-        #annotate-link-btn:not(:disabled):hover {
+        #confirm-selection-btn:not(:disabled):hover {
           background: #FDD835;
           border-color: #FDD835;
+        }
+
+        #confirm-selection-btn:not(:disabled):hover svg {
+          stroke: var(--color-black);
+        }
+
+        /* Floating annotation type selector */
+        .annotation-type-selector-floating {
+          position: absolute;
+          display: flex;
+          gap: 4px;
+          background: var(--color-white);
+          border: 1px solid var(--color-black);
+          padding: 4px;
+          z-index: 1000;
+          box-shadow: 2px 2px 0 rgba(0,0,0,0.1);
+        }
+
+        .annotation-type-btn-floating {
+          width: 28px;
+          height: 28px;
+          border: 1px solid var(--color-black);
+          background: var(--color-white);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+          transition: all 0.2s ease;
+        }
+
+        .annotation-type-btn-floating svg {
+          width: 16px;
+          height: 16px;
+          stroke: var(--color-black);
+          fill: none;
+          stroke-width: 1.5;
+        }
+
+        .annotation-type-btn-floating:hover {
+          background: var(--color-black);
+        }
+
+        .annotation-type-btn-floating:hover svg {
+          stroke: var(--color-white);
+        }
+
+        /* Comment form */
+        .image-comment-form {
+          position: absolute;
+          background: var(--color-white);
+          border: 2px solid var(--color-black);
+          padding: calc(var(--spacing-unit) * 2);
+          z-index: 10000;
+          min-width: 300px;
+          box-shadow: 4px 4px 0 rgba(0,0,0,0.1);
+        }
+
+        .image-comment-form textarea {
+          width: 100%;
+          min-height: 100px;
+          border: 1px solid var(--color-gray-200);
+          padding: calc(var(--spacing-unit) * 1);
+          font-family: inherit;
+          font-size: 0.9rem;
+          resize: vertical;
+        }
+
+        .image-comment-form-buttons {
+          display: flex;
+          gap: calc(var(--spacing-unit) * 1);
+          margin-top: calc(var(--spacing-unit) * 1);
+          justify-content: flex-end;
+        }
+
+        .image-comment-form button {
+          width: auto;
+          padding: calc(var(--spacing-unit) * 1) calc(var(--spacing-unit) * 2);
         }
 
         .viewer-container {
@@ -423,9 +489,11 @@ export class IIIFImagePanel extends HTMLElement {
               <path d="M18 6L6 18M6 6l12 12"/>
             </svg>
           </button>
-          <button id="annotate-comment-btn" disabled title="Add comment">💬</button>
-          <button id="annotate-tag-btn" disabled title="Add tag">🏷️</button>
-          <button id="annotate-link-btn" disabled title="Link to text">🔗</button>
+          <button id="confirm-selection-btn" disabled title="Confirm selection">
+            <svg viewBox="0 0 24 24">
+              <path d="M5 13l4 4L19 7"/>
+            </svg>
+          </button>
           <button class="toggle-metadata" id="toggle-metadata-btn" title="Show info">
             <svg viewBox="0 0 24 24">
               <circle cx="12" cy="12" r="10"/>
@@ -508,9 +576,7 @@ export class IIIFImagePanel extends HTMLElement {
     const selectBtn = this.shadowRoot.getElementById('select-btn');
     const drawingModeBtn = this.shadowRoot.getElementById('drawing-mode-btn');
     const clearSelectionBtn = this.shadowRoot.getElementById('clear-selection-btn');
-    const annotateCommentBtn = this.shadowRoot.getElementById('annotate-comment-btn');
-    const annotateTagBtn = this.shadowRoot.getElementById('annotate-tag-btn');
-    const annotateLinkBtn = this.shadowRoot.getElementById('annotate-link-btn');
+    const confirmSelectionBtn = this.shadowRoot.getElementById('confirm-selection-btn');
     const manifestInput = this.shadowRoot.getElementById('manifest-input');
     const prevBtn = this.shadowRoot.getElementById('prev-btn');
     const nextBtn = this.shadowRoot.getElementById('next-btn');
@@ -535,11 +601,7 @@ export class IIIFImagePanel extends HTMLElement {
     selectBtn.addEventListener('click', () => this.toggleSelectionMode());
     drawingModeBtn.addEventListener('click', () => this.toggleDrawingMode());
     clearSelectionBtn.addEventListener('click', () => this.clearSelection());
-
-    // Annotation type buttons
-    annotateCommentBtn.addEventListener('click', () => this.handleImageAnnotationType('comment'));
-    annotateTagBtn.addEventListener('click', () => this.handleImageAnnotationType('tag'));
-    annotateLinkBtn.addEventListener('click', () => this.handleImageAnnotationType('link'));
+    confirmSelectionBtn.addEventListener('click', () => this.confirmSelection());
 
     // Navigation buttons
     prevBtn.addEventListener('click', () => this.previousCanvas());
@@ -740,10 +802,11 @@ export class IIIFImagePanel extends HTMLElement {
         // Store selection data for later use
         this.currentSelectionData = selectionData;
 
-        // Enable annotation type buttons
-        this.enableAnnotationButtons();
+        // Enable confirm button
+        const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
+        confirmBtn.disabled = false;
 
-        this.updateInfo(`Freehand path selected - Choose annotation type`);
+        this.updateInfo(`Freehand path drawn - Click confirm to proceed`);
       } else {
         this.updateInfo('Path too short - draw a longer path');
       }
@@ -803,10 +866,11 @@ export class IIIFImagePanel extends HTMLElement {
         // Store selection data for later use
         this.currentSelectionData = selectionData;
 
-        // Enable annotation type buttons
-        this.enableAnnotationButtons();
+        // Enable confirm button
+        const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
+        confirmBtn.disabled = false;
 
-        this.updateInfo(`Region selected - Choose annotation type`);
+        this.updateInfo(`Region selected: ${w}x${h} - Click confirm to proceed`);
       }
     }
 
@@ -956,7 +1020,18 @@ export class IIIFImagePanel extends HTMLElement {
     this.currentPath = [];
     this.pathClosed = false;
     this.currentSelectionData = null;
-    this.disableAnnotationButtons();
+
+    // Disable confirm button
+    const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
+    if (confirmBtn) confirmBtn.disabled = true;
+
+    // Remove any floating UI
+    const floatingSelector = this.shadowRoot.querySelector('.annotation-type-selector-floating');
+    if (floatingSelector) floatingSelector.remove();
+
+    const floatingForm = this.shadowRoot.querySelector('.image-comment-form');
+    if (floatingForm) floatingForm.remove();
+
     this.updateInfo('Selection cleared');
   }
 
@@ -1415,24 +1490,76 @@ export class IIIFImagePanel extends HTMLElement {
     metadataContent.innerHTML = html || '<p>No metadata available</p>';
   }
 
-  enableAnnotationButtons() {
-    const commentBtn = this.shadowRoot.getElementById('annotate-comment-btn');
-    const tagBtn = this.shadowRoot.getElementById('annotate-tag-btn');
-    const linkBtn = this.shadowRoot.getElementById('annotate-link-btn');
+  confirmSelection() {
+    if (!this.currentSelectionData) return;
 
-    commentBtn.disabled = false;
-    tagBtn.disabled = false;
-    linkBtn.disabled = false;
+    // Disable confirm button
+    const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
+    confirmBtn.disabled = true;
+
+    // Get the current selection element
+    const currentSelection = this.shadowRoot.getElementById('current-selection-rect');
+    if (!currentSelection) return;
+
+    // Calculate position for floating buttons
+    const rect = currentSelection.getBoundingClientRect();
+    const container = this.shadowRoot.querySelector('.viewer-container');
+    const containerRect = container.getBoundingClientRect();
+
+    // Show floating annotation type selector
+    this.showFloatingAnnotationSelector(rect, containerRect);
+
+    this.updateInfo('Choose annotation type');
   }
 
-  disableAnnotationButtons() {
-    const commentBtn = this.shadowRoot.getElementById('annotate-comment-btn');
-    const tagBtn = this.shadowRoot.getElementById('annotate-tag-btn');
-    const linkBtn = this.shadowRoot.getElementById('annotate-link-btn');
+  showFloatingAnnotationSelector(selectionRect, containerRect) {
+    // Remove any existing selector
+    const existing = this.shadowRoot.querySelector('.annotation-type-selector-floating');
+    if (existing) existing.remove();
 
-    commentBtn.disabled = true;
-    tagBtn.disabled = true;
-    linkBtn.disabled = true;
+    const selector = document.createElement('div');
+    selector.className = 'annotation-type-selector-floating';
+
+    // Position to the right of the selection
+    const left = selectionRect.right - containerRect.left + 10;
+    const top = selectionRect.top - containerRect.top;
+    selector.style.left = `${left}px`;
+    selector.style.top = `${top}px`;
+
+    // Create three buttons with SVG icons
+    selector.innerHTML = `
+      <button class="annotation-type-btn-floating" data-type="comment" title="Free comment">
+        <svg viewBox="0 0 24 24">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+      </button>
+      <button class="annotation-type-btn-floating" data-type="tag" title="Tag">
+        <svg viewBox="0 0 24 24">
+          <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+          <circle cx="7" cy="7" r="1"/>
+        </svg>
+      </button>
+      <button class="annotation-type-btn-floating" data-type="link" title="Link to text">
+        <svg viewBox="0 0 24 24">
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+      </button>
+    `;
+
+    const container = this.shadowRoot.querySelector('.viewer-container');
+    container.appendChild(selector);
+
+    // Add click listeners
+    const buttons = selector.querySelectorAll('.annotation-type-btn-floating');
+    buttons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const type = btn.dataset.type;
+        selector.remove();
+        this.handleImageAnnotationType(type);
+      });
+    });
   }
 
   handleImageAnnotationType(type) {
@@ -1440,50 +1567,29 @@ export class IIIFImagePanel extends HTMLElement {
 
     const selectionData = this.currentSelectionData;
 
-    // Disable buttons
-    this.disableAnnotationButtons();
-
-    if (type === 'comment' || type === 'tag') {
-      // For comment/tag, confirm the rectangle and create standalone annotation
+    if (type === 'comment') {
+      // Show comment form
+      this.showImageCommentForm(selectionData);
+    } else if (type === 'tag') {
+      // For tag, confirm the rectangle and create standalone annotation
       this.confirmCurrentRect();
 
       // Get the confirmed element
       const allConfirmedRects = this.shadowRoot.querySelectorAll('.selection-rect.confirmed, svg.confirmed');
       const confirmedElement = allConfirmedRects[allConfirmedRects.length - 1];
 
-      if (type === 'comment') {
-        // For now, prompt for comment (can be improved with a form later)
-        const comment = prompt('Enter your comment:');
-        if (comment && comment.trim()) {
-          this.dispatchEvent(new CustomEvent('image-annotation-created', {
-            detail: {
-              element: confirmedElement,
-              selection: selectionData,
-              annotationType: 'comment',
-              body: comment.trim()
-            },
-            bubbles: true,
-            composed: true
-          }));
-          this.updateInfo('Comment annotation created');
-        } else {
-          this.updateInfo('Comment cancelled');
-        }
-      } else {
-        // Tag placeholder
-        this.dispatchEvent(new CustomEvent('image-annotation-created', {
-          detail: {
-            element: confirmedElement,
-            selection: selectionData,
-            annotationType: 'tag',
-            body: '[Tag functionality - coming soon]'
-          },
-          bubbles: true,
-          composed: true
-        }));
-        this.updateInfo('Tag annotation (placeholder)');
-      }
-
+      // Tag placeholder
+      this.dispatchEvent(new CustomEvent('image-annotation-created', {
+        detail: {
+          element: confirmedElement,
+          selection: selectionData,
+          annotationType: 'tag',
+          body: '[Tag functionality - coming soon]'
+        },
+        bubbles: true,
+        composed: true
+      }));
+      this.updateInfo('Tag annotation (placeholder)');
       this.currentSelectionData = null;
 
     } else if (type === 'link') {
@@ -1497,6 +1603,81 @@ export class IIIFImagePanel extends HTMLElement {
       this.updateInfo('Image ready to link');
       this.currentSelectionData = null;
     }
+  }
+
+  showImageCommentForm(selectionData) {
+    // Get current selection element for positioning
+    const currentSelection = this.shadowRoot.getElementById('current-selection-rect');
+    if (!currentSelection) return;
+
+    const rect = currentSelection.getBoundingClientRect();
+    const container = this.shadowRoot.querySelector('.viewer-container');
+    const containerRect = container.getBoundingClientRect();
+
+    // Create form
+    const form = document.createElement('div');
+    form.className = 'image-comment-form';
+
+    const left = rect.right - containerRect.left + 10;
+    const top = rect.top - containerRect.top;
+    form.style.left = `${left}px`;
+    form.style.top = `${top}px`;
+
+    form.innerHTML = `
+      <textarea placeholder="Enter your comment..."></textarea>
+      <div class="image-comment-form-buttons">
+        <button id="image-comment-cancel">Cancel</button>
+        <button id="image-comment-save">Save</button>
+      </div>
+    `;
+
+    container.appendChild(form);
+
+    const textarea = form.querySelector('textarea');
+    const cancelBtn = form.querySelector('#image-comment-cancel');
+    const saveBtn = form.querySelector('#image-comment-save');
+
+    textarea.focus();
+
+    cancelBtn.addEventListener('click', () => {
+      form.remove();
+      // Clear the current selection
+      this.clearCurrentSelectionRect();
+      this.currentSelectionData = null;
+      this.updateInfo('Comment cancelled');
+    });
+
+    saveBtn.addEventListener('click', () => {
+      const comment = textarea.value.trim();
+      if (!comment) {
+        alert('Please enter a comment');
+        return;
+      }
+
+      form.remove();
+
+      // Confirm the rectangle
+      this.confirmCurrentRect();
+
+      // Get the confirmed element
+      const allConfirmedRects = this.shadowRoot.querySelectorAll('.selection-rect.confirmed, svg.confirmed');
+      const confirmedElement = allConfirmedRects[allConfirmedRects.length - 1];
+
+      // Dispatch event
+      this.dispatchEvent(new CustomEvent('image-annotation-created', {
+        detail: {
+          element: confirmedElement,
+          selection: selectionData,
+          annotationType: 'comment',
+          body: comment
+        },
+        bubbles: true,
+        composed: true
+      }));
+
+      this.updateInfo(`Comment saved: "${comment.substring(0, 30)}${comment.length > 30 ? '...' : ''}"`);
+      this.currentSelectionData = null;
+    });
   }
 }
 
