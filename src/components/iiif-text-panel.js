@@ -203,6 +203,62 @@ export class IIIFTextPanel extends HTMLElement {
           background: #388E3C;
         }
 
+        .text-confirmed {
+          cursor: pointer;
+          position: relative;
+        }
+
+        /* Annotation info popup */
+        .annotation-info-popup {
+          position: absolute;
+          background: var(--color-white);
+          border: 2px solid var(--color-black);
+          padding: calc(var(--spacing-unit) * 1.5);
+          z-index: 10000;
+          min-width: 200px;
+          max-width: 300px;
+          box-shadow: 4px 4px 0 rgba(0,0,0,0.1);
+        }
+
+        .annotation-info-popup-header {
+          font-weight: 600;
+          margin-bottom: calc(var(--spacing-unit) * 1);
+          padding-bottom: calc(var(--spacing-unit) * 0.5);
+          border-bottom: 1px solid var(--color-gray-200);
+        }
+
+        .annotation-info-popup-content {
+          margin-bottom: calc(var(--spacing-unit) * 1);
+          font-size: 0.9rem;
+          line-height: 1.4;
+        }
+
+        .annotation-info-popup-buttons {
+          display: flex;
+          gap: calc(var(--spacing-unit) * 1);
+          justify-content: flex-end;
+        }
+
+        .annotation-info-popup button {
+          width: auto;
+          padding: calc(var(--spacing-unit) * 0.75) calc(var(--spacing-unit) * 1.5);
+        }
+
+        .annotation-info-popup .delete-btn {
+          background: #f44336;
+          border-color: #f44336;
+          color: var(--color-white);
+        }
+
+        .annotation-info-popup .delete-btn svg {
+          stroke: var(--color-white);
+        }
+
+        .annotation-info-popup .delete-btn:hover {
+          background: #d32f2f;
+          border-color: #d32f2f;
+        }
+
         button {
           width: 32px;
           height: 32px;
@@ -419,7 +475,14 @@ export class IIIFTextPanel extends HTMLElement {
     clearBtn.addEventListener('click', () => this.clearText());
 
     // Handle text selection
-    textDisplay.addEventListener('mouseup', () => this.handleTextSelection());
+    textDisplay.addEventListener('mouseup', (e) => {
+      // Check if clicking on existing annotation
+      if (e.target.classList.contains('text-confirmed')) {
+        this.showAnnotationInfo(e.target);
+        return;
+      }
+      this.handleTextSelection();
+    });
   }
 
   async loadTextFromUrl(url) {
@@ -1068,6 +1131,99 @@ export class IIIFTextPanel extends HTMLElement {
       this._canvasSyncEnabled = true;
       console.log('Canvas sync enabled for text panel');
     }
+  }
+
+  showAnnotationInfo(element) {
+    // Remove any existing popup
+    const existingPopup = this.shadowRoot.querySelector('.annotation-info-popup');
+    if (existingPopup) existingPopup.remove();
+
+    // Find annotation data
+    const confirmed = this.confirmedElements.find(c => c.element === element);
+    if (!confirmed) return;
+
+    const rect = element.getBoundingClientRect();
+    const shadowRect = this.shadowRoot.host.getBoundingClientRect();
+
+    // Create popup
+    const popup = document.createElement('div');
+    popup.className = 'annotation-info-popup';
+
+    const left = rect.left - shadowRect.left;
+    const top = rect.bottom - shadowRect.top + 5;
+    popup.style.left = `${left}px`;
+    popup.style.top = `${top}px`;
+
+    // Get annotation type and content
+    let typeText = 'Annotation';
+    let content = `"${confirmed.selection.text}"`;
+
+    // Check modality class for entity linking
+    if (element.classList.contains('denotation')) {
+      typeText = 'Entity Linking: Denotation';
+    } else if (element.classList.contains('dynamisation')) {
+      typeText = 'Entity Linking: Dynamisation';
+    } else if (element.classList.contains('integration')) {
+      typeText = 'Entity Linking: Integration';
+    } else if (element.classList.contains('transcription')) {
+      typeText = 'Entity Linking: Transcription';
+    }
+
+    popup.innerHTML = `
+      <div class="annotation-info-popup-header">${typeText}</div>
+      <div class="annotation-info-popup-content">${content}</div>
+      <div class="annotation-info-popup-buttons">
+        <button id="annotation-close">Close</button>
+        <button class="delete-btn" id="annotation-delete">
+          <svg viewBox="0 0 24 24">
+            <path d="M3 6h18M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+          </svg>
+        </button>
+      </div>
+    `;
+
+    this.shadowRoot.appendChild(popup);
+
+    const closeBtn = popup.querySelector('#annotation-close');
+    const deleteBtn = popup.querySelector('#annotation-delete');
+
+    closeBtn.addEventListener('click', () => popup.remove());
+
+    deleteBtn.addEventListener('click', () => {
+      // Remove element
+      const parent = element.parentNode;
+      const textNode = document.createTextNode(element.textContent);
+      parent.replaceChild(textNode, element);
+      parent.normalize();
+
+      // Remove from confirmed elements
+      const index = this.confirmedElements.indexOf(confirmed);
+      if (index > -1) {
+        this.confirmedElements.splice(index, 1);
+      }
+
+      // Dispatch delete event
+      this.dispatchEvent(new CustomEvent('annotation-deleted', {
+        detail: {
+          element: element,
+          selection: confirmed.selection
+        },
+        bubbles: true,
+        composed: true
+      }));
+
+      popup.remove();
+      this.updateInfo('Annotation deleted');
+    });
+
+    // Close popup when clicking outside
+    const closeOnClickOutside = (e) => {
+      if (!popup.contains(e.target) && e.target !== element) {
+        popup.remove();
+        document.removeEventListener('click', closeOnClickOutside);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeOnClickOutside), 0);
   }
 }
 

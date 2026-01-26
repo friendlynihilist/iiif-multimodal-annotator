@@ -322,9 +322,9 @@ export class IIIFImagePanel extends HTMLElement {
           border: 2px solid #4CAF50;
           background: rgba(76, 175, 80, 0.3);
           z-index: 100;
-          cursor: default;
+          cursor: pointer;
           transition: none;
-          pointer-events: none;
+          pointer-events: all;
           will-change: transform;
         }
 
@@ -366,13 +366,13 @@ export class IIIFImagePanel extends HTMLElement {
 
         /* SVG freehand paths */
         svg.confirmed {
-          cursor: default;
-          pointer-events: none;
+          cursor: pointer;
+          pointer-events: all;
           z-index: 100;
         }
 
         svg.confirmed path {
-          pointer-events: none;
+          pointer-events: all;
         }
 
         /* Modality colors for SVG paths */
@@ -665,6 +665,20 @@ export class IIIFImagePanel extends HTMLElement {
     selectionCanvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
     selectionCanvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
     selectionCanvas.addEventListener('mouseleave', (e) => this.onMouseUp(e));
+
+    // Handle clicks on confirmed annotations
+    selectionCanvas.addEventListener('click', (e) => {
+      const target = e.target;
+      // Check if clicking on confirmed rect or svg path
+      if (target.classList.contains('confirmed') ||
+          target.closest('.selection-rect.confirmed') ||
+          target.closest('svg.confirmed')) {
+        const element = target.classList.contains('confirmed') ? target : target.closest('.selection-rect.confirmed, svg.confirmed');
+        if (element) {
+          this.showImageAnnotationInfo(element, e);
+        }
+      }
+    });
   }
 
   toggleSelectionMode() {
@@ -1003,13 +1017,10 @@ export class IIIFImagePanel extends HTMLElement {
           pathElement.setAttribute('stroke', '#4CAF50');
           pathElement.setAttribute('fill', 'rgba(76, 175, 80, 0.3)');
         }
-        // Disable pointer events - box is now read-only
-        currentSelection.style.pointerEvents = 'none';
       }
 
-      // Disable pointer events for all confirmed selections to prevent interference
-      currentSelection.style.pointerEvents = 'none';
-      currentSelection.style.cursor = 'default';
+      // Make clickable for viewing info
+      currentSelection.style.cursor = 'pointer';
 
       this.confirmedRects.push({
         element: currentSelection,
@@ -1742,6 +1753,91 @@ export class IIIFImagePanel extends HTMLElement {
 
       this.updateInfo(`Comment saved`);
       this.currentSelectionData = null;
+    });
+  }
+
+  showImageAnnotationInfo(element, event) {
+    event.stopPropagation();
+
+    // Remove any existing sidebar
+    const existing = this.shadowRoot.querySelector('.comment-sidebar');
+    if (existing) existing.remove();
+
+    // Find annotation data
+    const confirmed = this.confirmedRects.find(c => c.element === element);
+    if (!confirmed) return;
+
+    const container = this.shadowRoot.querySelector('.viewer-container');
+
+    // Create sidebar for viewing/deleting
+    const sidebar = document.createElement('div');
+    sidebar.className = 'comment-sidebar';
+
+    // Get annotation type
+    let typeText = 'Annotation';
+    if (element.classList.contains('denotation')) {
+      typeText = 'Entity Linking: Denotation';
+    } else if (element.classList.contains('dynamisation')) {
+      typeText = 'Entity Linking: Dynamisation';
+    } else if (element.classList.contains('integration')) {
+      typeText = 'Entity Linking: Integration';
+    } else if (element.classList.contains('transcription')) {
+      typeText = 'Entity Linking: Transcription';
+    }
+
+    sidebar.innerHTML = `
+      <div class="comment-sidebar-header">
+        <span>${typeText}</span>
+        <button class="comment-sidebar-close">
+          <svg viewBox="0 0 24 24">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="comment-sidebar-content">
+        <p>Click delete to remove this annotation.</p>
+      </div>
+      <div class="comment-sidebar-buttons">
+        <button id="image-annotation-delete" style="background: #f44336; border-color: #f44336; color: white;">Delete</button>
+      </div>
+    `;
+
+    container.appendChild(sidebar);
+
+    // Trigger animation
+    setTimeout(() => sidebar.classList.add('visible'), 10);
+
+    const closeBtn = sidebar.querySelector('.comment-sidebar-close');
+    const deleteBtn = sidebar.querySelector('#image-annotation-delete');
+
+    const closeSidebar = () => {
+      sidebar.classList.remove('visible');
+      setTimeout(() => sidebar.remove(), 300);
+    };
+
+    closeBtn.addEventListener('click', closeSidebar);
+
+    deleteBtn.addEventListener('click', () => {
+      // Remove element
+      element.remove();
+
+      // Remove from confirmed rects
+      const index = this.confirmedRects.indexOf(confirmed);
+      if (index > -1) {
+        this.confirmedRects.splice(index, 1);
+      }
+
+      // Dispatch delete event
+      this.dispatchEvent(new CustomEvent('image-annotation-deleted', {
+        detail: {
+          element: element
+        },
+        bubbles: true,
+        composed: true
+      }));
+
+      closeSidebar();
+      this.updateInfo('Annotation deleted');
     });
   }
 }
