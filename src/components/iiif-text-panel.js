@@ -690,105 +690,53 @@ export class IIIFTextPanel extends HTMLElement {
   }
 
   showCommentSidebar(element, selection) {
-    // Remove any existing sidebar
-    const existing = this.shadowRoot.querySelector('.comment-sidebar');
-    if (existing) existing.remove();
-
-    // Create sidebar
-    const sidebar = document.createElement('div');
-    sidebar.className = 'comment-sidebar';
-
-    sidebar.innerHTML = `
-      <div class="comment-sidebar-header">
-        <span>Add Comment</span>
-        <button class="comment-sidebar-close">
-          <svg viewBox="0 0 24 24">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="comment-sidebar-content">
-        <textarea placeholder="Enter your comment..." id="text-comment-textarea"></textarea>
-      </div>
-      <div class="comment-sidebar-buttons">
-        <button id="text-comment-cancel">Cancel</button>
-        <button id="text-comment-save">Save</button>
-      </div>
-    `;
-
-    this.shadowRoot.appendChild(sidebar);
-
-    // Trigger animation
-    setTimeout(() => sidebar.classList.add('visible'), 10);
-
-    const textarea = sidebar.querySelector('#text-comment-textarea');
-    const closeBtn = sidebar.querySelector('.comment-sidebar-close');
-    const cancelBtn = sidebar.querySelector('#text-comment-cancel');
-    const saveBtn = sidebar.querySelector('#text-comment-save');
-
-    textarea.focus();
-
-    const closeSidebar = () => {
-      sidebar.classList.remove('visible');
-      setTimeout(() => sidebar.remove(), 300);
-    };
-
-    closeBtn.addEventListener('click', () => {
-      closeSidebar();
-      // Remove the yellow highlight
-      const parent = element.parentNode;
-      const textNode = document.createTextNode(element.textContent);
-      parent.replaceChild(textNode, element);
-      parent.normalize();
-      this.currentSelection = null;
-      this.currentSelectionElement = null;
-      this.updateInfo('Comment cancelled');
-    });
-
-    cancelBtn.addEventListener('click', () => {
-      closeSidebar();
-      // Remove the yellow highlight
-      const parent = element.parentNode;
-      const textNode = document.createTextNode(element.textContent);
-      parent.replaceChild(textNode, element);
-      parent.normalize();
-      this.currentSelection = null;
-      this.currentSelectionElement = null;
-      this.updateInfo('Comment cancelled');
-    });
-
-    saveBtn.addEventListener('click', () => {
-      const comment = textarea.value.trim();
-      if (!comment) {
-        return;
-      }
-
-      closeSidebar();
-
-      // Change to green
-      element.className = 'text-confirmed';
-
-      // Add to confirmed elements
-      this.addToConfirmedElements(element, selection);
-
-      // Dispatch event with comment
-      this.dispatchEvent(new CustomEvent('annotation-created', {
-        detail: {
-          element: element,
-          selection: selection,
-          annotationType: 'comment',
-          body: comment
+    // Emit event to show global sidebar
+    this.dispatchEvent(new CustomEvent('show-comment-sidebar', {
+      detail: {
+        type: 'text',
+        element: element,
+        selection: selection,
+        onCancel: () => {
+          // Remove the yellow highlight
+          const parent = element.parentNode;
+          if (parent) {
+            const textNode = document.createTextNode(element.textContent);
+            parent.replaceChild(textNode, element);
+            parent.normalize();
+          }
+          this.currentSelection = null;
+          this.currentSelectionElement = null;
+          this.updateInfo('Comment cancelled');
         },
-        bubbles: true,
-        composed: true
-      }));
+        onSave: (comment) => {
+          // Change to green
+          element.className = 'text-confirmed';
 
-      this.updateInfo(`Comment saved`);
+          // Add to confirmed elements
+          this.addToConfirmedElements(element, selection);
 
-      // Reset current selection
-      this.currentSelection = null;
-      this.currentSelectionElement = null;
-    });
+          // Dispatch event with comment
+          this.dispatchEvent(new CustomEvent('annotation-created', {
+            detail: {
+              element: element,
+              selection: selection,
+              annotationType: 'comment',
+              body: comment
+            },
+            bubbles: true,
+            composed: true
+          }));
+
+          this.updateInfo(`Comment saved`);
+
+          // Reset current selection
+          this.currentSelection = null;
+          this.currentSelectionElement = null;
+        }
+      },
+      bubbles: true,
+      composed: true
+    }));
   }
 
   showTagForm(element, selection) {

@@ -917,6 +917,122 @@ export class IIIFInterimAnnotator extends HTMLElement {
         .color-box.transcription {
           background: #4CAF50;
         }
+
+        /* Global annotation sidebar */
+        .annotation-sidebar {
+          position: fixed;
+          top: 0;
+          right: 0;
+          width: 400px;
+          height: 100vh;
+          background: var(--color-white);
+          border-left: 2px solid var(--color-black);
+          z-index: 100000;
+          transform: translateX(100%);
+          transition: transform 0.3s ease;
+          display: flex;
+          flex-direction: column;
+          box-shadow: -4px 0 8px rgba(0,0,0,0.1);
+        }
+
+        .annotation-sidebar.visible {
+          transform: translateX(0);
+        }
+
+        .annotation-sidebar-header {
+          padding: calc(var(--spacing-unit) * 2);
+          border-bottom: 1px solid var(--color-gray-200);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-weight: 600;
+          font-size: 1rem;
+        }
+
+        .annotation-sidebar-close {
+          width: 28px;
+          height: 28px;
+          border: 1px solid var(--color-black);
+          background: var(--color-white);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+          transition: all 0.2s ease;
+        }
+
+        .annotation-sidebar-close svg {
+          width: 16px;
+          height: 16px;
+          stroke: var(--color-black);
+          fill: none;
+          stroke-width: 1.5;
+        }
+
+        .annotation-sidebar-close:hover {
+          background: var(--color-black);
+        }
+
+        .annotation-sidebar-close:hover svg {
+          stroke: var(--color-white);
+        }
+
+        .annotation-sidebar-content {
+          flex: 1;
+          padding: calc(var(--spacing-unit) * 2);
+          overflow-y: auto;
+        }
+
+        .annotation-sidebar-content textarea {
+          width: 100%;
+          min-height: 200px;
+          border: 1px solid var(--color-gray-200);
+          padding: calc(var(--spacing-unit) * 1.5);
+          font-family: inherit;
+          font-size: 1rem;
+          resize: vertical;
+          line-height: 1.5;
+        }
+
+        .annotation-sidebar-content p {
+          margin: 0 0 calc(var(--spacing-unit) * 1) 0;
+          line-height: 1.6;
+        }
+
+        .annotation-sidebar-buttons {
+          padding: calc(var(--spacing-unit) * 2);
+          border-top: 1px solid var(--color-gray-200);
+          display: flex;
+          gap: calc(var(--spacing-unit) * 1);
+          justify-content: flex-end;
+        }
+
+        .annotation-sidebar button {
+          padding: calc(var(--spacing-unit) * 1.25) calc(var(--spacing-unit) * 2);
+          border: 1px solid var(--color-black);
+          background: var(--color-white);
+          cursor: pointer;
+          font-family: inherit;
+          font-size: 0.9rem;
+          transition: all 0.2s ease;
+        }
+
+        .annotation-sidebar button:hover {
+          background: var(--color-black);
+          color: var(--color-white);
+        }
+
+        .annotation-sidebar button.delete-btn {
+          background: #f44336;
+          border-color: #f44336;
+          color: var(--color-white);
+        }
+
+        .annotation-sidebar button.delete-btn:hover {
+          background: #d32f2f;
+          border-color: #d32f2f;
+        }
       </style>
 
       <header class="app-header">
@@ -1051,6 +1167,9 @@ export class IIIFInterimAnnotator extends HTMLElement {
           © 2026 Carlo Teo Pedretti
         </p>
       </div>
+
+      <!-- Global annotation sidebar -->
+      <div class="annotation-sidebar" id="annotation-sidebar"></div>
     `;
   }
 
@@ -1123,6 +1242,18 @@ export class IIIFInterimAnnotator extends HTMLElement {
       this.dispatchEvent(new CustomEvent('annotations-updated', {
         detail: { annotations: this.annotations }
       }));
+    });
+
+    // Listen for show comment sidebar requests
+    this.addEventListener('show-comment-sidebar', (e) => {
+      const { type, element, selection, selectionData, onCancel, onSave } = e.detail;
+      this.showGlobalCommentSidebar(type, onCancel, onSave);
+    });
+
+    // Listen for show annotation info requests
+    this.addEventListener('show-annotation-info', (e) => {
+      const { type, title, message, onDelete } = e.detail;
+      this.showGlobalAnnotationInfo(title, message, onDelete);
     });
 
     // Listen for image region selection events
@@ -2669,6 +2800,104 @@ Annotation Details:
     // Re-render panels
     this.renderPanels();
     this.updateStatus('Panels reordered');
+  }
+
+  showGlobalCommentSidebar(type, onCancel, onSave) {
+    const sidebar = this.shadowRoot.getElementById('annotation-sidebar');
+
+    sidebar.innerHTML = `
+      <div class="annotation-sidebar-header">
+        <span>Add Comment</span>
+        <button class="annotation-sidebar-close">
+          <svg viewBox="0 0 24 24">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="annotation-sidebar-content">
+        <textarea placeholder="Enter your comment..." id="global-comment-textarea"></textarea>
+      </div>
+      <div class="annotation-sidebar-buttons">
+        <button id="global-comment-cancel">Cancel</button>
+        <button id="global-comment-save">Save</button>
+      </div>
+    `;
+
+    // Show sidebar
+    setTimeout(() => sidebar.classList.add('visible'), 10);
+
+    const textarea = sidebar.querySelector('#global-comment-textarea');
+    const closeBtn = sidebar.querySelector('.annotation-sidebar-close');
+    const cancelBtn = sidebar.querySelector('#global-comment-cancel');
+    const saveBtn = sidebar.querySelector('#global-comment-save');
+
+    textarea.focus();
+
+    const closeSidebar = () => {
+      sidebar.classList.remove('visible');
+      setTimeout(() => {
+        sidebar.innerHTML = '';
+      }, 300);
+    };
+
+    closeBtn.addEventListener('click', () => {
+      closeSidebar();
+      if (onCancel) onCancel();
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      closeSidebar();
+      if (onCancel) onCancel();
+    });
+
+    saveBtn.addEventListener('click', () => {
+      const comment = textarea.value.trim();
+      if (!comment) return;
+
+      closeSidebar();
+      if (onSave) onSave(comment);
+    });
+  }
+
+  showGlobalAnnotationInfo(title, message, onDelete) {
+    const sidebar = this.shadowRoot.getElementById('annotation-sidebar');
+
+    sidebar.innerHTML = `
+      <div class="annotation-sidebar-header">
+        <span>${title}</span>
+        <button class="annotation-sidebar-close">
+          <svg viewBox="0 0 24 24">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="annotation-sidebar-content">
+        <p>${message}</p>
+      </div>
+      <div class="annotation-sidebar-buttons">
+        <button class="delete-btn" id="global-annotation-delete">Delete</button>
+      </div>
+    `;
+
+    // Show sidebar
+    setTimeout(() => sidebar.classList.add('visible'), 10);
+
+    const closeBtn = sidebar.querySelector('.annotation-sidebar-close');
+    const deleteBtn = sidebar.querySelector('#global-annotation-delete');
+
+    const closeSidebar = () => {
+      sidebar.classList.remove('visible');
+      setTimeout(() => {
+        sidebar.innerHTML = '';
+      }, 300);
+    };
+
+    closeBtn.addEventListener('click', closeSidebar);
+
+    deleteBtn.addEventListener('click', () => {
+      closeSidebar();
+      if (onDelete) onDelete();
+    });
   }
 }
 

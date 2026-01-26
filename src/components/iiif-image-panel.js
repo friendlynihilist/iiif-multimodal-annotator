@@ -539,11 +539,6 @@ export class IIIFImagePanel extends HTMLElement {
               <path d="M20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.84 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/>
             </svg>
           </button>
-          <button id="clear-selection-btn" title="Clear selection">
-            <svg viewBox="0 0 24 24">
-              <path d="M18 6L6 18M6 6l12 12"/>
-            </svg>
-          </button>
           <button class="toggle-metadata" id="toggle-metadata-btn" title="Show info">
             <svg viewBox="0 0 24 24">
               <circle cx="12" cy="12" r="10"/>
@@ -625,7 +620,6 @@ export class IIIFImagePanel extends HTMLElement {
     const loadBtn = this.shadowRoot.getElementById('load-btn');
     const selectBtn = this.shadowRoot.getElementById('select-btn');
     const drawingModeBtn = this.shadowRoot.getElementById('drawing-mode-btn');
-    const clearSelectionBtn = this.shadowRoot.getElementById('clear-selection-btn');
     const manifestInput = this.shadowRoot.getElementById('manifest-input');
     const prevBtn = this.shadowRoot.getElementById('prev-btn');
     const nextBtn = this.shadowRoot.getElementById('next-btn');
@@ -649,7 +643,6 @@ export class IIIFImagePanel extends HTMLElement {
 
     selectBtn.addEventListener('click', () => this.toggleSelectionMode());
     drawingModeBtn.addEventListener('click', () => this.toggleDrawingMode());
-    clearSelectionBtn.addEventListener('click', () => this.clearSelection());
 
     // Navigation buttons
     prevBtn.addEventListener('click', () => this.previousCanvas());
@@ -1665,113 +1658,51 @@ export class IIIFImagePanel extends HTMLElement {
   }
 
   showCommentSidebar(selectionData) {
-    // Remove any existing sidebar
-    const existing = this.shadowRoot.querySelector('.comment-sidebar');
-    if (existing) existing.remove();
-
-    const container = this.shadowRoot.querySelector('.viewer-container');
-
-    // Create sidebar
-    const sidebar = document.createElement('div');
-    sidebar.className = 'comment-sidebar';
-
-    sidebar.innerHTML = `
-      <div class="comment-sidebar-header">
-        <span>Add Comment</span>
-        <button class="comment-sidebar-close">
-          <svg viewBox="0 0 24 24">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="comment-sidebar-content">
-        <textarea placeholder="Enter your comment..." id="comment-textarea"></textarea>
-      </div>
-      <div class="comment-sidebar-buttons">
-        <button id="sidebar-comment-cancel">Cancel</button>
-        <button id="sidebar-comment-save">Save</button>
-      </div>
-    `;
-
-    container.appendChild(sidebar);
-
-    // Trigger animation
-    setTimeout(() => sidebar.classList.add('visible'), 10);
-
-    const textarea = sidebar.querySelector('#comment-textarea');
-    const closeBtn = sidebar.querySelector('.comment-sidebar-close');
-    const cancelBtn = sidebar.querySelector('#sidebar-comment-cancel');
-    const saveBtn = sidebar.querySelector('#sidebar-comment-save');
-
-    textarea.focus();
-
-    const closeSidebar = () => {
-      sidebar.classList.remove('visible');
-      setTimeout(() => sidebar.remove(), 300);
-    };
-
-    closeBtn.addEventListener('click', () => {
-      closeSidebar();
-      this.clearCurrentSelectionRect();
-      this.currentSelectionData = null;
-      this.updateInfo('Comment cancelled');
-    });
-
-    cancelBtn.addEventListener('click', () => {
-      closeSidebar();
-      this.clearCurrentSelectionRect();
-      this.currentSelectionData = null;
-      this.updateInfo('Comment cancelled');
-    });
-
-    saveBtn.addEventListener('click', () => {
-      const comment = textarea.value.trim();
-      if (!comment) {
-        return;
-      }
-
-      closeSidebar();
-
-      // Confirm the rectangle
-      this.confirmCurrentRect();
-
-      // Get the confirmed element
-      const allConfirmedRects = this.shadowRoot.querySelectorAll('.selection-rect.confirmed, svg.confirmed');
-      const confirmedElement = allConfirmedRects[allConfirmedRects.length - 1];
-
-      // Dispatch event
-      this.dispatchEvent(new CustomEvent('image-annotation-created', {
-        detail: {
-          element: confirmedElement,
-          selection: selectionData,
-          annotationType: 'comment',
-          body: comment
+    // Emit event to show global sidebar
+    this.dispatchEvent(new CustomEvent('show-comment-sidebar', {
+      detail: {
+        type: 'image',
+        selectionData: selectionData,
+        onCancel: () => {
+          this.clearCurrentSelectionRect();
+          this.currentSelectionData = null;
+          this.updateInfo('Comment cancelled');
         },
-        bubbles: true,
-        composed: true
-      }));
+        onSave: (comment) => {
+          // Confirm the rectangle
+          this.confirmCurrentRect();
 
-      this.updateInfo(`Comment saved`);
-      this.currentSelectionData = null;
-    });
+          // Get the confirmed element
+          const allConfirmedRects = this.shadowRoot.querySelectorAll('.selection-rect.confirmed, svg.confirmed');
+          const confirmedElement = allConfirmedRects[allConfirmedRects.length - 1];
+
+          // Dispatch event
+          this.dispatchEvent(new CustomEvent('image-annotation-created', {
+            detail: {
+              element: confirmedElement,
+              selection: selectionData,
+              annotationType: 'comment',
+              body: comment
+            },
+            bubbles: true,
+            composed: true
+          }));
+
+          this.updateInfo(`Comment saved`);
+          this.currentSelectionData = null;
+        }
+      },
+      bubbles: true,
+      composed: true
+    }));
   }
 
   showImageAnnotationInfo(element, event) {
     event.stopPropagation();
 
-    // Remove any existing sidebar
-    const existing = this.shadowRoot.querySelector('.comment-sidebar');
-    if (existing) existing.remove();
-
     // Find annotation data
     const confirmed = this.confirmedRects.find(c => c.element === element);
     if (!confirmed) return;
-
-    const container = this.shadowRoot.querySelector('.viewer-container');
-
-    // Create sidebar for viewing/deleting
-    const sidebar = document.createElement('div');
-    sidebar.className = 'comment-sidebar';
 
     // Get annotation type
     let typeText = 'Annotation';
@@ -1785,60 +1716,37 @@ export class IIIFImagePanel extends HTMLElement {
       typeText = 'Entity Linking: Transcription';
     }
 
-    sidebar.innerHTML = `
-      <div class="comment-sidebar-header">
-        <span>${typeText}</span>
-        <button class="comment-sidebar-close">
-          <svg viewBox="0 0 24 24">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="comment-sidebar-content">
-        <p>Click delete to remove this annotation.</p>
-      </div>
-      <div class="comment-sidebar-buttons">
-        <button id="image-annotation-delete" style="background: #f44336; border-color: #f44336; color: white;">Delete</button>
-      </div>
-    `;
+    // Emit event to show global sidebar
+    this.dispatchEvent(new CustomEvent('show-annotation-info', {
+      detail: {
+        type: 'image',
+        title: typeText,
+        message: 'Click delete to remove this annotation.',
+        onDelete: () => {
+          // Remove element
+          element.remove();
 
-    container.appendChild(sidebar);
+          // Remove from confirmed rects
+          const index = this.confirmedRects.indexOf(confirmed);
+          if (index > -1) {
+            this.confirmedRects.splice(index, 1);
+          }
 
-    // Trigger animation
-    setTimeout(() => sidebar.classList.add('visible'), 10);
+          // Dispatch delete event
+          this.dispatchEvent(new CustomEvent('image-annotation-deleted', {
+            detail: {
+              element: element
+            },
+            bubbles: true,
+            composed: true
+          }));
 
-    const closeBtn = sidebar.querySelector('.comment-sidebar-close');
-    const deleteBtn = sidebar.querySelector('#image-annotation-delete');
-
-    const closeSidebar = () => {
-      sidebar.classList.remove('visible');
-      setTimeout(() => sidebar.remove(), 300);
-    };
-
-    closeBtn.addEventListener('click', closeSidebar);
-
-    deleteBtn.addEventListener('click', () => {
-      // Remove element
-      element.remove();
-
-      // Remove from confirmed rects
-      const index = this.confirmedRects.indexOf(confirmed);
-      if (index > -1) {
-        this.confirmedRects.splice(index, 1);
-      }
-
-      // Dispatch delete event
-      this.dispatchEvent(new CustomEvent('image-annotation-deleted', {
-        detail: {
-          element: element
-        },
-        bubbles: true,
-        composed: true
-      }));
-
-      closeSidebar();
-      this.updateInfo('Annotation deleted');
-    });
+          this.updateInfo('Annotation deleted');
+        }
+      },
+      bubbles: true,
+      composed: true
+    }));
   }
 }
 
