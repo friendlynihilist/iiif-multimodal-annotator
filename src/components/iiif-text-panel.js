@@ -261,6 +261,68 @@ export class IIIFTextPanel extends HTMLElement {
           flex-basis: 100%;
           margin-top: calc(var(--spacing-unit) * 0.5);
         }
+
+        /* Annotation type selector */
+        .annotation-type-selector {
+          display: inline-flex;
+          gap: 4px;
+          margin-left: 8px;
+          vertical-align: middle;
+          position: relative;
+        }
+
+        .annotation-type-btn {
+          width: 24px;
+          height: 24px;
+          border: 1px solid var(--color-black);
+          background: var(--color-white);
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s ease;
+          font-size: 14px;
+          padding: 0;
+        }
+
+        .annotation-type-btn:hover {
+          background: var(--color-black);
+          color: var(--color-white);
+          transform: scale(1.1);
+        }
+
+        /* Comment form */
+        .comment-form {
+          position: fixed;
+          background: var(--color-white);
+          border: 2px solid var(--color-black);
+          padding: calc(var(--spacing-unit) * 2);
+          z-index: 10000;
+          min-width: 300px;
+          box-shadow: 4px 4px 0 rgba(0,0,0,0.1);
+        }
+
+        .comment-form textarea {
+          width: 100%;
+          min-height: 100px;
+          border: 1px solid var(--color-gray-200);
+          padding: calc(var(--spacing-unit) * 1);
+          font-family: inherit;
+          font-size: 0.9rem;
+          resize: vertical;
+        }
+
+        .comment-form-buttons {
+          display: flex;
+          gap: calc(var(--spacing-unit) * 1);
+          margin-top: calc(var(--spacing-unit) * 1);
+          justify-content: flex-end;
+        }
+
+        .comment-form button {
+          width: auto;
+          padding: calc(var(--spacing-unit) * 1) calc(var(--spacing-unit) * 2);
+        }
       </style>
 
       <div class="container">
@@ -438,35 +500,160 @@ export class IIIFTextPanel extends HTMLElement {
     // Change highlight color from yellow to green
     this.currentSelectionElement.className = 'text-confirmed';
 
-    // Add to confirmed elements list (these will persist)
-    this.confirmedElements.push({
-      element: this.currentSelectionElement,
-      selection: this.currentSelection
-    });
-
-    // Dispatch event to parent annotator with element reference
-    this.dispatchEvent(new CustomEvent('text-confirmed', {
-      detail: {
-        element: this.currentSelectionElement,
-        selection: this.currentSelection
-      },
-      bubbles: true,
-      composed: true
-    }));
-
-    // Store for later reference
+    // Store references
     const savedSelection = this.currentSelection;
     const savedElement = this.currentSelectionElement;
 
-    // Reset current selection (ready for next annotation)
-    this.currentSelection = null;
-    this.currentSelectionElement = null;
+    // Show annotation type selector
+    this.showAnnotationTypeSelector(savedElement, savedSelection);
 
     // Disable confirm button
     const confirmBtn = this.shadowRoot.getElementById('confirm-selection-btn');
     confirmBtn.disabled = true;
 
-    this.updateInfo(`Confirmed (green) - Ready to link or select next`);
+    this.updateInfo(`Choose annotation type: 💬 Comment, 🏷️ Tag, or 🔗 Link`);
+  }
+
+  showAnnotationTypeSelector(element, selection) {
+    // Create inline selector with three icons
+    const selector = document.createElement('span');
+    selector.className = 'annotation-type-selector';
+    selector.innerHTML = `
+      <button class="annotation-type-btn" data-type="comment" title="Free comment">💬</button>
+      <button class="annotation-type-btn" data-type="tag" title="Tag">🏷️</button>
+      <button class="annotation-type-btn" data-type="link" title="Entity linking">🔗</button>
+    `;
+
+    // Insert after the element
+    element.parentNode.insertBefore(selector, element.nextSibling);
+
+    // Add event listeners
+    const buttons = selector.querySelectorAll('.annotation-type-btn');
+    buttons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const type = btn.dataset.type;
+        this.handleAnnotationType(type, element, selection, selector);
+      });
+    });
+  }
+
+  handleAnnotationType(type, element, selection, selector) {
+    // Remove the selector buttons
+    selector.remove();
+
+    if (type === 'comment') {
+      this.showCommentForm(element, selection);
+    } else if (type === 'tag') {
+      this.showTagForm(element, selection);
+    } else if (type === 'link') {
+      // Use existing entity linking system
+      this.addToConfirmedElements(element, selection);
+      this.dispatchEvent(new CustomEvent('text-confirmed', {
+        detail: {
+          element: element,
+          selection: selection,
+          annotationType: 'entity-linking'
+        },
+        bubbles: true,
+        composed: true
+      }));
+      this.updateInfo(`Entity linking mode - Ready to connect`);
+    }
+
+    // Reset current selection
+    this.currentSelection = null;
+    this.currentSelectionElement = null;
+  }
+
+  showCommentForm(element, selection) {
+    // Create form positioned near the element
+    const form = document.createElement('div');
+    form.className = 'comment-form';
+
+    const rect = element.getBoundingClientRect();
+    const shadowRect = this.shadowRoot.host.getBoundingClientRect();
+    form.style.left = `${rect.left - shadowRect.left + 20}px`;
+    form.style.top = `${rect.bottom - shadowRect.top + 5}px`;
+
+    form.innerHTML = `
+      <textarea placeholder="Enter your comment..."></textarea>
+      <div class="comment-form-buttons">
+        <button id="comment-cancel">Cancel</button>
+        <button id="comment-save">Save</button>
+      </div>
+    `;
+
+    this.shadowRoot.appendChild(form);
+
+    const textarea = form.querySelector('textarea');
+    const cancelBtn = form.querySelector('#comment-cancel');
+    const saveBtn = form.querySelector('#comment-save');
+
+    textarea.focus();
+
+    cancelBtn.addEventListener('click', () => {
+      form.remove();
+      // Remove the green highlight
+      const parent = element.parentNode;
+      const textNode = document.createTextNode(element.textContent);
+      parent.replaceChild(textNode, element);
+      parent.normalize();
+      this.updateInfo(`Comment cancelled`);
+    });
+
+    saveBtn.addEventListener('click', () => {
+      const comment = textarea.value.trim();
+      if (!comment) {
+        alert('Please enter a comment');
+        return;
+      }
+
+      form.remove();
+
+      // Add to confirmed elements
+      this.addToConfirmedElements(element, selection);
+
+      // Dispatch event with comment
+      this.dispatchEvent(new CustomEvent('annotation-created', {
+        detail: {
+          element: element,
+          selection: selection,
+          annotationType: 'comment',
+          body: comment
+        },
+        bubbles: true,
+        composed: true
+      }));
+
+      this.updateInfo(`Comment saved: "${comment.substring(0, 30)}${comment.length > 30 ? '...' : ''}"`);
+    });
+  }
+
+  showTagForm(element, selection) {
+    // Placeholder for now
+    this.addToConfirmedElements(element, selection);
+
+    this.dispatchEvent(new CustomEvent('annotation-created', {
+      detail: {
+        element: element,
+        selection: selection,
+        annotationType: 'tag',
+        body: '[Tag functionality - coming soon]'
+      },
+      bubbles: true,
+      composed: true
+    }));
+
+    this.updateInfo(`Tag annotation (placeholder)`);
+  }
+
+  addToConfirmedElements(element, selection) {
+    // Add to confirmed elements list (these will persist)
+    this.confirmedElements.push({
+      element: element,
+      selection: selection
+    });
   }
 
   clearSelection() {

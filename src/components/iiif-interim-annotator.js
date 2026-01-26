@@ -1089,10 +1089,40 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     // Listen for text confirmation (ready to be linked)
     this.addEventListener('text-confirmed', (e) => {
-      const { element, selection } = e.detail;
-      this.unlinkedTextElements.push({ element, selection });
-      this.makeDraggable(element, 'text');
-      this.updateStatus(`Text ready to link (${this.unlinkedTextElements.length} unlinked)`);
+      const { element, selection, annotationType } = e.detail;
+      if (annotationType === 'entity-linking') {
+        this.unlinkedTextElements.push({ element, selection });
+        this.makeDraggable(element, 'text');
+        this.updateStatus(`Text ready to link (${this.unlinkedTextElements.length} unlinked)`);
+      }
+    });
+
+    // Listen for standalone text annotations (comment, tag)
+    this.addEventListener('annotation-created', (e) => {
+      const { element, selection, annotationType, body } = e.detail;
+
+      // Create standalone annotation (not linked to image)
+      const annotation = this.createStandaloneAnnotation(selection, annotationType, body);
+      this.annotations.push(annotation);
+
+      this.updateStatus(`${annotationType} annotation created`);
+      this.dispatchEvent(new CustomEvent('annotations-updated', {
+        detail: { annotations: this.annotations }
+      }));
+    });
+
+    // Listen for standalone image annotations (comment, tag)
+    this.addEventListener('image-annotation-created', (e) => {
+      const { element, selection, annotationType, body } = e.detail;
+
+      // Create standalone image annotation
+      const annotation = this.createStandaloneImageAnnotation(selection, annotationType, body);
+      this.annotations.push(annotation);
+
+      this.updateStatus(`Image ${annotationType} annotation created`);
+      this.dispatchEvent(new CustomEvent('annotations-updated', {
+        detail: { annotations: this.annotations }
+      }));
     });
 
     // Listen for image region selection events
@@ -2186,6 +2216,55 @@ Annotation Details:
     this.selectedTextRange = null;
     this.selectedImageRegion = null;
     this.updateLinkButton();
+  }
+
+  createStandaloneAnnotation(selection, annotationType, body) {
+    const annotation = {
+      '@context': 'http://www.w3.org/ns/anno.jsonld',
+      type: 'Annotation',
+      id: `annotation-${Date.now()}`,
+      motivation: annotationType === 'comment' ? 'commenting' : 'tagging',
+      body: {
+        type: 'TextualBody',
+        value: body,
+        format: 'text/plain'
+      },
+      target: {
+        type: 'Text',
+        selector: selection.selector,
+        source: selection.text
+      },
+      annotationType: annotationType,
+      created: new Date().toISOString()
+    };
+
+    return annotation;
+  }
+
+  createStandaloneImageAnnotation(selection, annotationType, body) {
+    const annotation = {
+      '@context': 'http://www.w3.org/ns/anno.jsonld',
+      type: 'Annotation',
+      id: `annotation-${Date.now()}`,
+      motivation: annotationType === 'comment' ? 'commenting' : 'tagging',
+      body: {
+        type: 'TextualBody',
+        value: body,
+        format: 'text/plain'
+      },
+      target: {
+        type: 'Image',
+        source: selection.source,
+        selector: selection.selector,
+        canvasId: selection.canvasId || null,
+        canvasIndex: selection.canvasIndex !== undefined ? selection.canvasIndex : null,
+        canvasLabel: selection.canvasLabel || null
+      },
+      annotationType: annotationType,
+      created: new Date().toISOString()
+    };
+
+    return annotation;
   }
 
   drawConnectionLine() {
