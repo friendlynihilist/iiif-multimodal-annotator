@@ -23,6 +23,7 @@ export class IIIFImagePanel extends HTMLElement {
     this.canvases = []; // All canvases from manifest
     this.currentCanvasIndex = 0; // Current canvas index
     this.manifestData = null; // Store full manifest
+    this.manifestUrl = null; // Store manifest URL
   }
 
   static get observedAttributes() {
@@ -945,6 +946,7 @@ export class IIIFImagePanel extends HTMLElement {
       const manifest = await response.json();
 
       this.manifestData = manifest;
+      this.manifestUrl = manifestUrl;
       this.canvases = [];
       this.currentCanvasIndex = 0;
 
@@ -1359,6 +1361,14 @@ export class IIIFImagePanel extends HTMLElement {
           </div>`;
         }
       });
+    }
+
+    // Manifest URL
+    if (this.manifestUrl) {
+      html += `<div class="metadata-item">
+        <span class="metadata-label">Manifest:</span>
+        <span class="metadata-value"><a href="${this.manifestUrl}" target="_blank">${this.manifestUrl}</a></span>
+      </div>`;
     }
 
     // Canvas count
