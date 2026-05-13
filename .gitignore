@@ -23,4 +23,5 @@ yarn-error.log
 dist/
 build/
 backend/.venv/
-backend/__pycache__/
+__pycache__/
+*.pyc

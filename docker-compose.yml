@@ -1,24 +1,40 @@
 # ─────────────────────────────────────────────────────────────────────
 # Multimodal Annotator — local orchestration
 #
-# Phase 1 stub. Services will be fleshed out in T1.3.
-# Run:   docker compose up
-# Stop:  docker compose down  (data persists in the `fuseki-data` volume)
-# Wipe:  docker compose down -v
+# Phase 1 (T1.3).
+#
+# Lifecycle:
+#   docker compose up -d                 → start fuseki + backend
+#   ./scripts/bootstrap-fuseki.sh        → load every profile's ontology.ttl
+#                                          into its named graph (idempotent;
+#                                          re-runnable whenever an ontology
+#                                          changes)
+#   curl localhost:8000/health           → expects "ok" once bootstrap done
+#   docker compose down                  → stop containers (data persists)
+#   docker compose down -v               → also drop the fuseki-data volume
 # ─────────────────────────────────────────────────────────────────────
 
 services:
   fuseki:
-    image: stain/jena-fuseki:5.0.0
+    image: secoresearch/fuseki:5.5.0
     container_name: mma-fuseki
     environment:
-      ADMIN_PASSWORD: admin
-      JVM_ARGS: -Xmx2g
-      FUSEKI_DATASET_1: mma
+      ADMIN_PASSWORD: ${FUSEKI_ADMIN_PASSWORD:-changeme}
+      ENABLE_UPDATE: "true"
+      ENABLE_SHACL: "true"
+      JVM_ARGS: ${FUSEKI_JVM_ARGS:--Xmx2g}
     ports:
       - "3030:3030"
     volumes:
-      - fuseki-data:/fuseki
+      - fuseki-data:/fuseki-base/databases
+    healthcheck:
+      # `$$` escapes the docker-compose variable expansion so the literal
+      # `$/ping` URL path reaches curl unmodified.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3030/$$/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
   backend:
     build:
@@ -28,12 +44,21 @@ services:
     env_file:
       - .env
     environment:
-      FUSEKI_URL: http://fuseki:3030/mma
+      # Override container-network defaults so the backend talks to the
+      # `fuseki` service by its compose hostname regardless of what the
+      # operator's .env says (the .env value is meant for host-side tools
+      # like the bootstrap script).
+      FUSEKI_URL: http://fuseki:3030
+      PROFILES_DIR: /app/profiles
+      CONTEXTS_DIR: /app/contexts
     ports:
       - "8000:8000"
     volumes:
       - ./profiles:/app/profiles:ro
       - ./contexts:/app/contexts:ro
+    # `service_started` (not `service_healthy`): the backend must come up
+    # even when Fuseki is still booting or unreachable — it reports the
+    # situation on /health rather than refusing to start.
     depends_on:
       - fuseki
 

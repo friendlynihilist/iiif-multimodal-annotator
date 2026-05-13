@@ -239,9 +239,10 @@ On profile load:
 
 ### How the backend uses a profile
 
-1. On startup, load every profile's `ontology.ttl` into a named graph `g:ontology:<id>`.
-2. On annotation write, the gateway looks up which profile the annotation belongs to via the **`mma:profile`** predicate on the annotation (the tool-owned namespace, configurable via `BASE_NS`). Containers may also be profile-keyed.
-3. (Phase 3+) Validate the annotation against the profile's `shapes.ttl` before committing.
+1. **Out-of-band**, `scripts/bootstrap-fuseki.sh` loads every profile's `ontology.ttl` into a named graph `${BASE_NS}graphs/ontology/<id>` via the Graph Store Protocol. The script is idempotent (the GSP `PUT` semantics replace the graph) and runs against a healthy Fuseki, not at backend startup — this lets the backend come up regardless of Fuseki state and lets ops re-seed without restarts.
+2. The backend's `/health` endpoint reports `degraded` (with a list of missing graphs) until every profile's ontology graph has ≥1 triple.
+3. On annotation write, the gateway looks up which profile the annotation belongs to via the **`mma:profile`** predicate on the annotation (the tool-owned namespace, configurable via `BASE_NS`). Containers may also be profile-keyed.
+4. (Phase 3+) Validate the annotation against the profile's `shapes.ttl` before committing.
 
 ### Tool namespace (`mma:`)
 

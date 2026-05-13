@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **T1.3** — FastAPI backend gateway skeleton under `backend/app/`:
+  - `app/main.py` wires CORS middleware and five route modules
+  - `app/config.py` loads env vars into a frozen `Settings` dataclass and
+    emits a startup WARN if `FUSEKI_ADMIN_PASSWORD` matches any of
+    `{changeme, admin, password, fuseki, ""}`
+  - `app/services/fuseki.py` is an async httpx client (Phase 1: `ping`
+    and `graph_triple_count`)
+  - `app/services/profiles.py` reads profile manifests from the filesystem
+  - `app/routes/health.py` returns one of `ok | degraded | down` with
+    HTTP 200 + state body (so LBs can read body without confusing
+    "crashed" with "degraded"). `degraded` enumerates missing ontology
+    graphs and points to the bootstrap script
+  - `app/routes/profiles.py`: `GET /profiles` and `GET /profiles/{id}`
+  - `app/routes/contexts.py`: `GET /contexts/{name}.jsonld` with default-
+    profile aliases (`interim-geko` / `multimodal-context` / `default`)
+  - `app/routes/wap.py` and `app/routes/sparql.py` are 501-stubs that
+    name the implementing task (T1.4 / T2.5) in their detail field
+- **T1.3** — `backend/Dockerfile` (python:3.11-slim + curl for healthchecks
+  + the pinned dependency set in `backend/requirements.txt`).
+- **T1.3** — `scripts/bootstrap-fuseki.sh`: idempotent ontology loader.
+  Waits for `$FUSEKI_URL/$/ping`, PUTs every `profiles/<id>/ontology.ttl`
+  to its named graph via the Graph Store Protocol, then verifies with a
+  COUNT query. Re-runnable to re-seed mid-demo without restarting any
+  container.
 - **T1.2** — `backend/scripts/test_context_roundtrip.py`: pyld + rdflib
   driven round-trip validator for the default profile's JSON-LD context.
   Four samples cover every emission shape of the v1 frontend (ekphrastic
@@ -34,6 +58,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   legacy `interim:profile` placeholder on every exported triple.
 
 ### Changed
+- **T1.3** — `docker-compose.yml`: image pinned to
+  `secoresearch/fuseki:5.5.0` (actively maintained against Jena 5.5.0 on
+  JDK 21; the stain/jena-fuseki image is on 4.x and no longer
+  recommended). Admin password reads from `${FUSEKI_ADMIN_PASSWORD:-
+  changeme}`. The volume mounts the secoresearch default
+  `/fuseki-base/databases` so the pre-configured `ds` dataset with TDB +
+  Lucene persists across `docker compose down`. The backend uses
+  `depends_on: - fuseki` (started, not healthy) so it can boot and
+  report `degraded` via `/health` while Fuseki finishes warming up.
+- **T1.3** — `.env.example`: adds `FUSEKI_DATASET=ds`,
+  `FUSEKI_ADMIN_USER=admin`, `FUSEKI_ADMIN_PASSWORD=changeme` (with a
+  CHANGE-BEFORE-PUBLIC-DEPLOY comment), and `FUSEKI_JVM_ARGS=-Xmx2g`.
 - **T1.2** — `contexts/multimodal-context.jsonld`: removed in-context
   `_comment_*` keys (they are not valid JSON-LD term definitions and
   caused pyld to fail expansion). Added `dctypes:` prefix and the W3C

@@ -1,0 +1,8 @@
+# Pinned for reproducibility. Bump deliberately when needed.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+rdflib==7.1.1
+pyld==2.0.4
+httpx==0.28.1
+python-multipart==0.0.20
+python-dotenv==1.0.1

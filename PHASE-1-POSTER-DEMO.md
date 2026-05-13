@@ -82,7 +82,16 @@ This is the prerequisite to RDF anything. See `contexts/multimodal-context.jsonl
   - `DELETE /w3c/{container}/{id}` → delete
   - `POST /sparql` → SPARQL query passthrough
   - `POST /sparql/update` → SPARQL update (admin only later, public for Phase 1)
-- On startup, load every profile's ontology into a named graph `g:ontology:{profile_id}` in Fuseki.
+- **Ontology loading is OUT of the backend startup path.** A separate
+  idempotent script `scripts/bootstrap-fuseki.sh` (a) polls
+  `$FUSEKI_URL/$/ping` until ready, (b) PUTs every
+  `profiles/<id>/ontology.ttl` into named graph
+  `${BASE_NS}graphs/ontology/<id>` via the Graph Store Protocol, (c)
+  verifies the load with a COUNT query. The backend's `/health` endpoint
+  reports `degraded` (with a list of missing graphs) until the script
+  has run. This split lets the backend start even when Fuseki is still
+  booting, and lets ops re-seed the demo dataset by re-running one
+  script without restarting any container.
 
 **DONE WHEN**: `docker compose up`, then `curl localhost:8000/health` returns 200, and `curl localhost:8000/profiles` returns at least the `interim-geko` manifest.
 

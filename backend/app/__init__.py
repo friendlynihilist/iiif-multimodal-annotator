@@ -1,0 +1,1 @@
+"""Multimodal Annotator backend gateway."""
