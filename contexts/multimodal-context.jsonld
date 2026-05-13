@@ -1,5 +1,5 @@
 {
-  "_comment": "JSON-LD context for the default interim-geko profile. Namespaces verified by Carlo on 2026-05-13. The w3id.org redirects for interim/, geko/, mlao/, hico/, and multimodal-annotator/ns/ are pending registration (Carlo). LRMoo uses the historical http://iflastandards.info/ns/lrm/lrmoo/ — kept stable across this codebase. The tool-owned namespace `mma:` (https://w3id.org/multimodal-annotator/ns/) is the configurable BASE_NS on the backend.",
+  "_comment": "JSON-LD context for the default interim-geko profile. Namespaces verified by Carlo on 2026-05-13 against the source ontologies. NOTE on HICO: the canonical RDF namespace is http://purl.org/emmedi/hico/ (Daquino's URI used in real triples); https://w3id.org/hico/ is only a redirect to the documentation page and is NOT the right value for the @context. The w3id.org redirects for interim/, geko/, mlao/, and multimodal-annotator/ns/ are pending registration (Carlo). LRMoo uses the historical http://iflastandards.info/ns/lrm/lrmoo/ — kept stable across this codebase. The tool-owned namespace `mma:` (https://w3id.org/multimodal-annotator/ns/) is the configurable BASE_NS on the backend.",
 
   "@context": {
     "@version": 1.1,
@@ -25,7 +25,7 @@
     "geko":     "https://w3id.org/geko/",
     "mlao":     "https://w3id.org/mlao/",
     "icon":     "https://w3id.org/icon/ontology/",
-    "hico":     "https://w3id.org/hico/",
+    "hico":     "http://purl.org/emmedi/hico/",
 
     "iiif":     "http://iiif.io/api/presentation/3#",
     "sc":       "http://iiif.io/api/presentation/2#",
@@ -130,9 +130,16 @@
     "IconologicalSubject":      "icon:IconologicalSubject",
 
     "InterpretationAct":          "hico:InterpretationAct",
-    "wasGeneratedBy":             { "@id": "hico:wasGeneratedBy", "@type": "@id" },
+    "InterpretationType":         "hico:InterpretationType",
+    "InterpretationCriterion":    "hico:InterpretationCriterion",
     "hasInterpretationType":      "hico:hasInterpretationType",
     "hasInterpretationCriterion": { "@id": "hico:hasInterpretationCriterion", "@type": "@id" },
+    "isExtractedFrom":            { "@id": "hico:isExtractedFrom",            "@type": "@id" },
+
+    "Activity":        "prov:Activity",
+    "wasGeneratedBy":  { "@id": "prov:wasGeneratedBy", "@type": "@id" },
+    "startedAtTime":   { "@id": "prov:startedAtTime",  "@type": "xsd:dateTime" },
+    "endedAtTime":     { "@id": "prov:endedAtTime",    "@type": "xsd:dateTime" },
 
     "F1_Work":       "lrmoo:F1_Work",
     "F2_Expression": "lrmoo:F2_Expression",

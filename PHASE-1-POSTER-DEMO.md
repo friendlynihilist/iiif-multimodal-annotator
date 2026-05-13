@@ -49,7 +49,8 @@ This is the prerequisite to RDF anything. See `contexts/multimodal-context.jsonl
 
 - Make sure every term used in the v1 export (`oa:`, `lrmoo:`, `geko:`, `interim:`, `miro:`, `mlao:`, `icon:`, `hico:`, `crm:`, `skos:`, `dcterms:`) is in the context, **plus the new `mma:` namespace** (`https://w3id.org/multimodal-annotator/ns/`).
 - For each term, decide `@id` and `@type` (especially `@type: @id` for URI-valued properties).
-- **HICO namespace is `https://w3id.org/hico/`** (NOT `http://purl.org/emmedi/hico/`). Fix in both the `@context` and the v1 `ontology/interim.ttl` (which currently uses the old URI) before round-trip testing.
+- **HICO namespace is `http://purl.org/emmedi/hico/`** (Daquino's canonical RDF URI; the `https://w3id.org/hico/` URL is only a redirect to the docs and does NOT belong in `@prefix hico:`). The v1 `ontology/interim.ttl` already uses the right URI — leave it alone.
+- **Provenance properties:** the predicate from `oa:Annotation` to its `hico:InterpretationAct` is `prov:wasGeneratedBy` (PROV-O, not HICO — `hico:wasGeneratedBy` does not exist). The act's timestamp is `prov:startedAtTime`. Add the `prov:` prefix to the context and make sure both terms are mapped.
 - The `profile` term resolves to `mma:profile`, not `interim:profile`.
 - Serve the context from the backend (next task) at `/contexts/interim-geko.jsonld` and also save a copy in `contexts/`.
 - Validate with `pyld` (or any JSON-LD processor): `pyld.jsonld.expand(annotation_export)` must round-trip cleanly.

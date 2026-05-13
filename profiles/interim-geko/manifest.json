@@ -19,7 +19,7 @@
     "geko":    "https://w3id.org/geko/",
     "mlao":    "https://w3id.org/mlao/",
     "icon":    "https://w3id.org/icon/ontology/",
-    "hico":    "https://w3id.org/hico/",
+    "hico":    "http://purl.org/emmedi/hico/",
     "lrmoo":   "http://iflastandards.info/ns/lrm/lrmoo/",
     "crm":     "http://www.cidoc-crm.org/cidoc-crm/"
   },

@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **HICO namespace correction** (supersedes the change in `1b5236c`
+  T1.2 and the earlier briefing). The canonical RDF namespace for HICO 2.0
+  is `http://purl.org/emmedi/hico/` (Daquino's URI used in real triples),
+  NOT `https://w3id.org/hico/` — that URL is only a redirect to the
+  documentation page and does not belong in `@prefix hico:`. Reverted in:
+  - `contexts/multimodal-context.jsonld` (`hico` prefix; context header
+    comment updated to explain the difference)
+  - `profiles/interim-geko/ontology.ttl` (`@prefix hico:`)
+  - `profiles/interim-geko/manifest.json` (`namespaces.hico`)
+  - `docs/architecture/ARCHITECTURE-v2.md` (Turtle example)
+  - `CLAUDE.md` "Things to never do" entry (now positively reinforces
+    `purl.org/emmedi/hico/`)
+  - `PHASE-1-POSTER-DEMO.md` T1.2 acceptance criteria
+  - `ontology/README.md` deprecation pointer
+  - `backend/scripts/test_context_roundtrip.py` (docstring + sample IRI)
+- **Provenance properties moved from HICO to PROV-O.** HICO 2.0 is built
+  on top of PROV-O: `hico:InterpretationAct` is a sub-class of
+  `prov:Activity`; there is no `hico:wasGeneratedBy`. Changes in
+  `contexts/multimodal-context.jsonld`:
+  - `wasGeneratedBy` term now resolves to `prov:wasGeneratedBy`
+    (was: `hico:wasGeneratedBy`)
+  - Added `Activity → prov:Activity`,
+    `startedAtTime → prov:startedAtTime (xsd:dateTime)`,
+    `endedAtTime → prov:endedAtTime (xsd:dateTime)`
+  - Added HICO class aliases `InterpretationType`,
+    `InterpretationCriterion`, plus the property `isExtractedFrom`
+  - The example annotation in `ARCHITECTURE-v2.md` now uses
+    `prov:wasGeneratedBy` on the annotation and
+    `prov:startedAtTime` on the InterpretationAct (was `dcterms:date`),
+    and declares `prov:Activity` as a second type on the act.
+  This makes the briefing's recommended provenance shape (T1.4b)
+  consistent with the real ontology before the round-trip test for
+  T1.4 runs.
+- **rdflib pin loosened** (`>=7.6.0` instead of `==7.1.1`). The previous
+  pin worked on Python 3.11 (the Docker target) but `RDF.value` access
+  in `rdflib/resource.py` raises `AttributeError` under Python 3.14
+  (the host's pyenv default), which blocked re-running the round-trip
+  validator in the local venv. 7.6.0+ works on both.
+
 ### Added
 - **T1.3** — FastAPI backend gateway skeleton under `backend/app/`:
   - `app/main.py` wires CORS middleware and five route modules

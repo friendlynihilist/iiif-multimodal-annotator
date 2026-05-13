@@ -166,7 +166,15 @@ The `w3id` redirect is not yet registered; Carlo will register it later. The bas
 - **Do not write to `loadAnnotations()` without re-rendering.** This is a known bug, fixing it is on the critical path.
 - **Do not emit `interim:profile` in triples.** Use `mma:profile` (`https://w3id.org/multimodal-annotator/ns/profile`). The base is configurable via `BASE_NS`.
 - **Do not hardcode the creator IRI** in tests, examples, or backend defaults. Read `DEFAULT_CREATOR_IRI` from the environment (Phase 1 single-user shortcut; replaced by real auth in Phase 3).
-- **Do not reintroduce the `purl.org/emmedi/hico/` namespace.** HICO is `https://w3id.org/hico/` everywhere (ontology, `@context`, manifests, Turtle examples).
+- **HICO namespace is `http://purl.org/emmedi/hico/`** everywhere (ontology,
+  `@context`, manifests, Turtle examples). `https://w3id.org/hico/` is a
+  documentation redirect, NOT the canonical RDF namespace — using it as
+  `@prefix hico:` produces triples that don't unify with real HICO data.
+- **Provenance properties live on `prov:`, not `hico:`.** HICO 2.0 is built
+  on top of PROV-O: `hico:InterpretationAct` is a sub-class of
+  `prov:Activity`; the link from `oa:Annotation` to its act is
+  `prov:wasGeneratedBy`; the timestamp on the act is `prov:startedAtTime`.
+  There is no `hico:wasGeneratedBy`.
 
 ---
 

@@ -4,7 +4,7 @@ T1.2 round-trip validator for the default profile's JSON-LD @context.
 
 Loads `contexts/multimodal-context.jsonld`, builds annotations that mirror
 every shape the v1 frontend currently emits (with the Phase 1 corrections
-applied — HICO at w3id.org/hico/, mma:profile in place of interim:profile),
+applied — HICO at purl.org/emmedi/hico/, mma:profile in place of interim:profile),
 expands each through pyld, and reports any term that is lost.
 
 A term is "lost" if it is present as a non-`@`-keyed key in the input but no
@@ -175,11 +175,12 @@ def sample_with_provenance() -> dict:
         },
         "hasEkphrasticModality": "denotation",
         "wasGeneratedBy": {
-            "type": "InterpretationAct",
+            "type": ["InterpretationAct", "Activity"],
             "hasInterpretationType": "ekphrasis",
             "hasInterpretationCriterion":
-                "https://w3id.org/hico/criterion/iconographical-analysis",
+                "http://purl.org/emmedi/hico/criterion/iconographical-analysis",
             "creator": "https://orcid.org/0000-0002-4115-0078",
+            "startedAtTime": "2026-05-13T11:00:00Z",
         },
         "hasAnchor": {
             "type": "Anchor",

@@ -265,7 +265,8 @@ A linking annotation (text → image, with GEKO denotation) under the default pr
 @prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix lrmoo: <http://iflastandards.info/ns/lrm/lrmoo/> .
 @prefix geko:  <https://w3id.org/geko/> .
-@prefix hico:  <https://w3id.org/hico/> .
+@prefix hico:  <http://purl.org/emmedi/hico/> .
+@prefix prov:  <http://www.w3.org/ns/prov#> .
 @prefix mma:   <https://w3id.org/multimodal-annotator/ns/> .
 
 GRAPH <https://anno.example.org/annotations/a-2026-05-12T184200Z> {
@@ -276,7 +277,7 @@ GRAPH <https://anno.example.org/annotations/a-2026-05-12T184200Z> {
       oa:hasBody    <a-2026-05-12T184200Z/body> ;
       oa:hasTarget  <a-2026-05-12T184200Z/target> ;
       dcterms:created "2026-05-12T18:42:00Z"^^xsd:dateTime ;
-      hico:wasGeneratedBy <a-2026-05-12T184200Z/interpretation> ;
+      prov:wasGeneratedBy <a-2026-05-12T184200Z/interpretation> ;
       geko:hasEkphrasticModality geko:denotation ;
       mma:profile <https://w3id.org/multimodal-annotator/profiles/interim-geko> .
 
@@ -305,10 +306,10 @@ GRAPH <https://anno.example.org/annotations/a-2026-05-12T184200Z> {
       ] .
 
   <a-2026-05-12T184200Z/interpretation>
-      a hico:InterpretationAct ;
+      a hico:InterpretationAct, prov:Activity ;
       hico:hasInterpretationType "ekphrasis"@en ;
       dcterms:creator <https://orcid.org/0000-0000-0000-0000> ;
-      dcterms:date "2026-05-12T18:42:00Z"^^xsd:dateTime .
+      prov:startedAtTime "2026-05-12T18:42:00Z"^^xsd:dateTime .
 }
 ```
 
