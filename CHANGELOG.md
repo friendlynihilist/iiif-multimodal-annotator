@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **T1.2** — `backend/scripts/test_context_roundtrip.py`: pyld + rdflib
+  driven round-trip validator for the default profile's JSON-LD context.
+  Four samples cover every emission shape of the v1 frontend (ekphrastic
+  linking, transcribing, standalone comment, HICO+MLAO+ICON provenance);
+  all expand cleanly to RDF with no dropped terms. The script will be
+  promoted into `backend/app/tests/` when T1.3 lands.
 - `backend/` directory (placeholder; FastAPI scaffolding lands in T1.3).
 - `profiles/` directory with the first profile bundle: `profiles/interim-geko/`
   containing `manifest.json` (new), `ontology.ttl` (moved from `ontology/`),
@@ -28,6 +34,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   legacy `interim:profile` placeholder on every exported triple.
 
 ### Changed
+- **T1.2** — `contexts/multimodal-context.jsonld`: removed in-context
+  `_comment_*` keys (they are not valid JSON-LD term definitions and
+  caused pyld to fail expansion). Added `dctypes:` prefix and the W3C
+  resource types `Image / Text / Video / Audio / Dataset / Software`.
+  Added the full OA motivation vocabulary as context terms (`linking`,
+  `commenting`, `tagging`, `transcribing`, plus the rest from
+  anno.jsonld) and `painting` (IIIF). Added context entries for every
+  non-standard v1 field so they round-trip without loss: `class →
+  rdf:type`, `property → geko:hasEkphrasticModality`, `modality →
+  geko:hasEkphrasticModality (@vocab)`, `canvasId/canvasIndex/
+  canvasLabel/lineId/coords/pageNr/annotationType → mma:*`.
+- **T1.2** — `src/components/multimodal-annotator.js`: the
+  `modalityProperty` map now emits `https://w3id.org/geko/...` instead
+  of `http://w3id.org/geko/...`, aligning with the canonical w3id.org
+  namespace and removing a duplicate `geko:hasEkphrasticModality`
+  triple in the round-trip output.
 - **Repository renamed**: `iiif-interim-annotator` → `iiif-multimodal-annotator`
   (the IIIF prefix retained for discoverability; supersedes ADR 0001's
   bare `multimodal-annotator` proposal).

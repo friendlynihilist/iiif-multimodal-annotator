@@ -2117,9 +2117,9 @@ export class IIIFInterimAnnotator extends HTMLElement {
     } else {
       // INTERIM/GEKO model for painting (ekphrastic analysis)
       const modalityProperty = {
-        denotation: 'http://w3id.org/geko/denotation',
-        dynamisation: 'http://w3id.org/geko/dynamisation',
-        integration: 'http://w3id.org/geko/integration'
+        denotation: 'https://w3id.org/geko/denotation',
+        dynamisation: 'https://w3id.org/geko/dynamisation',
+        integration: 'https://w3id.org/geko/integration'
       }[modality];
 
       annotation = {

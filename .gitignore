@@ -22,3 +22,5 @@ yarn-error.log
 # Build outputs
 dist/
 build/
+backend/.venv/
+backend/__pycache__/
