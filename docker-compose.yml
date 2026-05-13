@@ -21,6 +21,11 @@ services:
     environment:
       ADMIN_PASSWORD: ${FUSEKI_ADMIN_PASSWORD:-changeme}
       ENABLE_UPDATE: "true"
+      # ENABLE_DATA_WRITE flips the dataset's GSP service from `gsp-r`
+      # (read-only) to `gsp-rw` — required for the bootstrap script's
+      # PUT into a named graph. Confirmed inspecting docker-entrypoint.sh
+      # of secoresearch/fuseki:5.5.0.
+      ENABLE_DATA_WRITE: "true"
       ENABLE_SHACL: "true"
       JVM_ARGS: ${FUSEKI_JVM_ARGS:--Xmx2g}
     ports:
@@ -28,9 +33,10 @@ services:
     volumes:
       - fuseki-data:/fuseki-base/databases
     healthcheck:
-      # `$$` escapes the docker-compose variable expansion so the literal
-      # `$/ping` URL path reaches curl unmodified.
-      test: ["CMD-SHELL", "curl -fsS http://localhost:3030/$$/ping || exit 1"]
+      # secoresearch/fuseki:5.5.0 ships without curl; wget is present.
+      # `$$` escapes docker-compose variable interpolation so the literal
+      # `$/ping` URL reaches wget unmodified.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3030/$$/ping >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6

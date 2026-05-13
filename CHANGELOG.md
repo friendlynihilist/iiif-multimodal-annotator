@@ -67,6 +67,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Lucene persists across `docker compose down`. The backend uses
   `depends_on: - fuseki` (started, not healthy) so it can boot and
   report `degraded` via `/health` while Fuseki finishes warming up.
+  Live-verification fixes (post-commit `6af4934`):
+  * `ENABLE_DATA_WRITE: "true"` added — without it the dataset's GSP
+    service is `gsp-r` (read-only) and the bootstrap PUT returns
+    `HTTP 405: HTTP method not allowed: PUT : Read-only`. Confirmed by
+    inspecting `/docker-entrypoint.sh` of secoresearch/fuseki:5.5.0.
+  * Healthcheck command switched from `curl` (not installed in the
+    image) to `wget -qO-`, which IS present. Fuseki now reports
+    `healthy` ~6s after start.
 - **T1.3** — `.env.example`: adds `FUSEKI_DATASET=ds`,
   `FUSEKI_ADMIN_USER=admin`, `FUSEKI_ADMIN_PASSWORD=changeme` (with a
   CHANGE-BEFORE-PUBLIC-DEPLOY comment), and `FUSEKI_JVM_ARGS=-Xmx2g`.
