@@ -1,6 +1,8 @@
-# IIIF INTERIM Annotator
+# Multimodal Annotator
 
-Un annotatore semantico basato su Web Components e IIIF per la gestione e l'analisi di fenomeni intermediali, con particolare focus sull'ecfrasi.
+> **Heads up — the project is being rebranded (ADR 0001).** Until recently this tool was called *IIIF INTERIM Annotator*; that name lives on only as the default profile (`profiles/interim-geko`). The full v2 README rewrite lands in PHASE-1 task T3.2 — what follows below is still the v1 documentation, kept as a working reference. For the v2 plan, read `CLAUDE.md`, `ROADMAP.md`, `PHASE-1-POSTER-DEMO.md`, and `docs/architecture/ARCHITECTURE-v2.md`.
+
+Un annotatore semantico basato su Web Components e IIIF per la gestione e l'analisi di fenomeni multimodali (testi, immagini, manoscritti), con un profilo predefinito orientato all'ecfrasi.
 
 ## Descrizione
 
@@ -23,8 +25,8 @@ Questo progetto fornisce un'interfaccia web modulare e riusabile per l'annotazio
 
 ```bash
 # Clona la repository
-git clone https://github.com/friendlynihilist/iiif-interim-annotator.git
-cd iiif-interim-annotator
+git clone https://github.com/friendlynihilist/iiif-multimodal-annotator.git
+cd iiif-multimodal-annotator
 
 # Installa dipendenze
 npm install
@@ -229,7 +231,7 @@ Carlo Teo Pedretti
 
 ## Link
 
-- Repository: https://github.com/friendlynihilist/iiif-interim-annotator
+- Repository: https://github.com/friendlynihilist/iiif-multimodal-annotator
 - INTERIM Ontology: https://w3id.org/interim/
 - IIIF: https://iiif.io/
 - Web Annotations: https://www.w3.org/TR/annotation-model/

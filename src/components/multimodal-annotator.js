@@ -1,6 +1,14 @@
 /**
- * Main container component for IIIF INTERIM Annotator
- * Manages text and image panels with annotation synchronization
+ * Main container component for the Multimodal Annotator
+ * (was: IIIF INTERIM Annotator — Phase 1 partial rename, see ADR 0001 and CLAUDE.md §"Phase 1 rename scope").
+ *
+ * Manages text, image, facsimile (and Phase 1 forthcoming: sparql) panels with annotation synchronization.
+ *
+ * Custom element: <multimodal-annotator>
+ * Deprecated alias: <iiif-interim-annotator> (subclass, emits console.warn — removed in Phase 3).
+ *
+ * The internal class name `IIIFInterimAnnotator` is intentionally kept in v0.2.x to minimise diff
+ * surface during Phase 1; it is re-exported as `MultimodalAnnotator` for new code paths.
  */
 export class IIIFInterimAnnotator extends HTMLElement {
   constructor() {
@@ -49,14 +57,14 @@ export class IIIFInterimAnnotator extends HTMLElement {
           width: 100%;
           height: 100vh;
           font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
-          background: #ffffff;
-          --color-black: #000000;
-          --color-white: #ffffff;
-          --color-gray-100: #f5f5f5;
-          --color-gray-200: #e5e5e5;
-          --color-gray-300: #d4d4d4;
-          --color-gray-700: #404040;
-          --color-accent: #000000;
+          background: #f8f6f2;
+          --color-black: #3b3f9f;
+          --color-white: #f8f6f2;
+          --color-gray-100: #ebe9e5;
+          --color-gray-200: #dbd8d2;
+          --color-gray-300: #c5c2bc;
+          --color-gray-700: #5a5850;
+          --color-accent: #6bd8a4;
           --spacing-unit: 8px;
         }
 
@@ -993,6 +1001,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
           font-size: 1rem;
           resize: vertical;
           line-height: 1.5;
+          box-sizing: border-box;
         }
 
         .annotation-sidebar-content p {
@@ -1032,6 +1041,25 @@ export class IIIFInterimAnnotator extends HTMLElement {
         .annotation-sidebar button.delete-btn:hover {
           background: #d32f2f;
           border-color: #d32f2f;
+        }
+
+        /* Sidebar backdrop */
+        .sidebar-backdrop {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100vh;
+          background: rgba(0, 0, 0, 0.3);
+          z-index: 99999;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.3s ease;
+        }
+
+        .sidebar-backdrop.visible {
+          opacity: 1;
+          pointer-events: all;
         }
       </style>
 
@@ -1169,6 +1197,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
       </div>
 
       <!-- Global annotation sidebar -->
+      <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
       <div class="annotation-sidebar" id="annotation-sidebar"></div>
     `;
   }
@@ -2804,6 +2833,7 @@ Annotation Details:
 
   showGlobalCommentSidebar(type, onCancel, onSave) {
     const sidebar = this.shadowRoot.getElementById('annotation-sidebar');
+    const backdrop = this.shadowRoot.getElementById('sidebar-backdrop');
 
     sidebar.innerHTML = `
       <div class="annotation-sidebar-header">
@@ -2823,8 +2853,11 @@ Annotation Details:
       </div>
     `;
 
-    // Show sidebar
-    setTimeout(() => sidebar.classList.add('visible'), 10);
+    // Show sidebar and backdrop
+    setTimeout(() => {
+      sidebar.classList.add('visible');
+      backdrop.classList.add('visible');
+    }, 10);
 
     const textarea = sidebar.querySelector('#global-comment-textarea');
     const closeBtn = sidebar.querySelector('.annotation-sidebar-close');
@@ -2835,10 +2868,17 @@ Annotation Details:
 
     const closeSidebar = () => {
       sidebar.classList.remove('visible');
+      backdrop.classList.remove('visible');
       setTimeout(() => {
         sidebar.innerHTML = '';
       }, 300);
     };
+
+    // Close on backdrop click
+    backdrop.addEventListener('click', () => {
+      closeSidebar();
+      if (onCancel) onCancel();
+    });
 
     closeBtn.addEventListener('click', () => {
       closeSidebar();
@@ -2861,6 +2901,7 @@ Annotation Details:
 
   showGlobalAnnotationInfo(title, message, onDelete) {
     const sidebar = this.shadowRoot.getElementById('annotation-sidebar');
+    const backdrop = this.shadowRoot.getElementById('sidebar-backdrop');
 
     sidebar.innerHTML = `
       <div class="annotation-sidebar-header">
@@ -2879,18 +2920,25 @@ Annotation Details:
       </div>
     `;
 
-    // Show sidebar
-    setTimeout(() => sidebar.classList.add('visible'), 10);
+    // Show sidebar and backdrop
+    setTimeout(() => {
+      sidebar.classList.add('visible');
+      backdrop.classList.add('visible');
+    }, 10);
 
     const closeBtn = sidebar.querySelector('.annotation-sidebar-close');
     const deleteBtn = sidebar.querySelector('#global-annotation-delete');
 
     const closeSidebar = () => {
       sidebar.classList.remove('visible');
+      backdrop.classList.remove('visible');
       setTimeout(() => {
         sidebar.innerHTML = '';
       }, 300);
     };
+
+    // Close on backdrop click
+    backdrop.addEventListener('click', closeSidebar);
 
     closeBtn.addEventListener('click', closeSidebar);
 
@@ -2901,4 +2949,18 @@ Annotation Details:
   }
 }
 
-customElements.define('iiif-interim-annotator', IIIFInterimAnnotator);
+// Primary registration: the canonical Phase 1 tag.
+customElements.define('multimodal-annotator', IIIFInterimAnnotator);
+
+// Deprecated alias kept for backwards compatibility. A subclass is required because
+// a single class cannot be registered under two tag names. Removed in Phase 3 (ADR 0001).
+class IIIFInterimAnnotatorDeprecated extends IIIFInterimAnnotator {
+  constructor() {
+    super();
+    console.warn(
+      '<iiif-interim-annotator> is deprecated; use <multimodal-annotator> instead. ' +
+      'The alias will be removed in Phase 3 (see docs/adr/0001-rebrand-multimodal.md).'
+    );
+  }
+}
+customElements.define('iiif-interim-annotator', IIIFInterimAnnotatorDeprecated);

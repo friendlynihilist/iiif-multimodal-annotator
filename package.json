@@ -1,12 +1,12 @@
 {
-  "name": "iiif-interim-annotator",
-  "version": "0.1.0",
-  "description": "Web Components-based semantic annotator for IIIF and intermedial phenomena",
+  "name": "iiif-multimodal-annotator",
+  "version": "0.2.0-dev",
+  "description": "Web Components-based semantic annotator for IIIF and multimodal phenomena. Default profile: INTERIM/GEKO (ekphrasis).",
   "type": "module",
-  "main": "dist/iiif-interim-annotator.js",
-  "module": "dist/iiif-interim-annotator.js",
+  "main": "dist/multimodal-annotator.js",
+  "module": "dist/multimodal-annotator.js",
   "exports": {
-    ".": "./dist/iiif-interim-annotator.js"
+    ".": "./dist/multimodal-annotator.js"
   },
   "scripts": {
     "dev": "vite",
