@@ -92,7 +92,37 @@ Working name: **Multimodal Annotator** (MMA for short). The repo, the npm packag
 
 `interim` becomes the name of the default profile, not the tool.
 
-If the author later picks a more poetic name, find-replace will not be hard — keep names consistent internally so this stays trivial.
+### Phase 1 rename scope (mechanical, partial)
+
+To minimise risk, Phase 1 renames **only external identifiers**. Phase 3 will do the full sweep.
+
+In scope for Phase 1:
+
+- Repository name: `iiif-multimodal-annotator` (IIIF prefix retained for discoverability — supersedes ADR 0001's `multimodal-annotator` proposal)
+- npm package `name`: `iiif-multimodal-annotator`
+- Primary custom element tag: `<multimodal-annotator>` (the deprecated tag `<iiif-interim-annotator>` remains as an alias subclass until Phase 3 — emits a `console.warn` on construction)
+- Main component file: `src/components/multimodal-annotator.js` (was `iiif-interim-annotator.js`)
+- README / PROJECT-OVERVIEW titles and the high-level prose
+
+**Out of scope for Phase 1** (do **not** touch):
+
+- CSS custom property `--color-black` (the indigo `#3b3f9f` token keeps its legacy name)
+- CSS class names (`.text-confirmed`, `.selection-rect.confirmed`, etc.)
+- Internal JS class names (`IIIFInterimAnnotator` stays — re-exported as alias `MultimodalAnnotator`)
+- Custom event names (`text-confirmed`, `image-region-selected`, etc.)
+- Sub-component tags `<iiif-text-panel>` / `<iiif-image-panel>` (the `iiif-` prefix here refers to the IIIF standard, not the old tool name)
+
+### Tool namespace prefix
+
+Tool-emitted predicates (currently the `interim:profile` placeholder used in the v1 export and called out in ARCHITECTURE-v2) move to a dedicated namespace owned by the tool, not by the default profile:
+
+```
+mma:  https://w3id.org/multimodal-annotator/ns/
+```
+
+The `w3id` redirect is not yet registered; Carlo will register it later. The base namespace is configurable via the `BASE_NS` env var on the backend so the URI can be changed in one place if a more evocative tool name (Polyphon, etc.) is later chosen.
+
+`mma:profile` replaces `interim:profile` in every triple from day one.
 
 ---
 
@@ -134,6 +164,9 @@ If the author later picks a more poetic name, find-replace will not be hard — 
 - **Do not delete or significantly refactor the existing v1 components without a migration plan in the relevant ADR.** Working code is precious right now.
 - **Do not commit secrets, API keys, or local Fuseki credentials.** `.env.example` only.
 - **Do not write to `loadAnnotations()` without re-rendering.** This is a known bug, fixing it is on the critical path.
+- **Do not emit `interim:profile` in triples.** Use `mma:profile` (`https://w3id.org/multimodal-annotator/ns/profile`). The base is configurable via `BASE_NS`.
+- **Do not hardcode the creator IRI** in tests, examples, or backend defaults. Read `DEFAULT_CREATOR_IRI` from the environment (Phase 1 single-user shortcut; replaced by real auth in Phase 3).
+- **Do not reintroduce the `purl.org/emmedi/hico/` namespace.** HICO is `https://w3id.org/hico/` everywhere (ontology, `@context`, manifests, Turtle examples).
 
 ---
 

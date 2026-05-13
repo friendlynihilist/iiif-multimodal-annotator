@@ -1,5 +1,5 @@
 {
-  "_comment": "Seed JSON-LD context for the default interim-geko profile. Phase 1 task T1.2. THE URIS BELOW MUST BE VERIFIED before going live. In particular: (a) LRMoo v1.0 was approved by IFLA in April 2024 and its namespace has moved between versions — the current LRMoo 1.0 namespace per IFLA standards is https://www.iflastandards.info/lrm/lrmoo/ but historical work uses http://iflastandards.info/ns/lrm/lrmoo/ — pick one and stick with it; (b) verify your own ontology namespaces (interim, geko, mlao) resolve at w3id.org redirects; (c) HICO prefix below is from Marilena Daquino — verify her current canonical URI.",
+  "_comment": "JSON-LD context for the default interim-geko profile. Namespaces verified by Carlo on 2026-05-13. The w3id.org redirects for interim/, geko/, mlao/, hico/, and multimodal-annotator/ns/ are pending registration (Carlo). LRMoo uses the historical http://iflastandards.info/ns/lrm/lrmoo/ — kept stable across this codebase. The tool-owned namespace `mma:` (https://w3id.org/multimodal-annotator/ns/) is the configurable BASE_NS on the backend.",
 
   "@context": {
     "@version": 1.1,
@@ -19,11 +19,12 @@
     "crm":      "http://www.cidoc-crm.org/cidoc-crm/",
     "lrmoo":    "http://iflastandards.info/ns/lrm/lrmoo/",
 
+    "mma":      "https://w3id.org/multimodal-annotator/ns/",
     "interim":  "https://w3id.org/interim/",
     "geko":     "https://w3id.org/geko/",
     "mlao":     "https://w3id.org/mlao/",
     "icon":     "https://w3id.org/icon/ontology/",
-    "hico":     "http://purl.org/emmedi/hico/",
+    "hico":     "https://w3id.org/hico/",
 
     "iiif":     "http://iiif.io/api/presentation/3#",
     "sc":       "http://iiif.io/api/presentation/2#",
@@ -68,6 +69,9 @@
     "items":    { "@id": "as:items", "@container": "@list" },
     "label":    "rdfs:label",
 
+    "_comment_mma": "Multimodal Annotator tool-owned predicates. Profile identification belongs here, not in any ontology's namespace.",
+    "profile":             { "@id": "mma:profile", "@type": "@id" },
+
     "_comment_geko": "GEKO ekphrastic-modality vocabulary",
     "denotation":   "geko:denotation",
     "dynamisation": "geko:dynamisation",
@@ -76,14 +80,13 @@
     "hasTextualReferent":    { "@id": "geko:hasTextualReferent",    "@type": "@id" },
     "hasIconicReferent":     { "@id": "geko:hasIconicReferent",     "@type": "@id" },
 
-    "_comment_interim": "INTERIM core classes/properties",
+    "_comment_interim": "INTERIM core classes/properties (the default profile, NOT the tool)",
     "IntermedialRelation": "interim:IntermedialRelation",
     "IntermedialObject":   "interim:IntermedialObject",
     "Medium":              "interim:Medium",
     "producesObject":      { "@id": "interim:producesObject", "@type": "@id" },
     "hasSourceMedium":     { "@id": "interim:hasSourceMedium", "@type": "@id" },
     "hasTargetMedium":     { "@id": "interim:hasTargetMedium", "@type": "@id" },
-    "profile":             { "@id": "interim:profile", "@type": "@id" },
 
     "_comment_mlao": "MLAO multi-level annotation",
     "Anchor":             "mlao:Anchor",
@@ -96,7 +99,7 @@
     "IconographicalSubject":    "icon:IconographicalSubject",
     "IconologicalSubject":      "icon:IconologicalSubject",
 
-    "_comment_hico": "HICO interpretation provenance",
+    "_comment_hico": "HICO interpretation provenance (Daquino) — canonical namespace w3id.org/hico/",
     "InterpretationAct":          "hico:InterpretationAct",
     "wasGeneratedBy":             { "@id": "hico:wasGeneratedBy", "@type": "@id" },
     "hasInterpretationType":      "hico:hasInterpretationType",
@@ -113,7 +116,7 @@
     "R16_created":             { "@id": "lrmoo:R16_created",        "@type": "@id" },
     "R17_created":             { "@id": "lrmoo:R17_created",        "@type": "@id" },
 
-    "_comment_crm": "Selected CIDOC-CRM classes commonly referenced",
+    "_comment_crm": "Selected CIDOC-CRM classes commonly referenced (also used by the cidoc-crm-bare profile)",
     "E22_Human-Made_Object": "crm:E22_Human-Made_Object",
     "E36_Visual_Item":       "crm:E36_Visual_Item",
     "E33_Linguistic_Object": "crm:E33_Linguistic_Object",

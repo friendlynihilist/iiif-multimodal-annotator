@@ -44,6 +44,12 @@
 │   - SHACL validation (pyshacl)              (Phase 3+)              │
 │   - HICO provenance generator                                       │
 │   - Auth (OAuth / API key)                  (Phase 3+)              │
+│                                                                     │
+│  Env config (.env):                                                 │
+│   BASE_NS=https://w3id.org/multimodal-annotator/ns/                 │
+│   DEFAULT_CREATOR_IRI=https://orcid.org/0000-0002-4115-0078         │
+│   FUSEKI_URL=http://fuseki:3030/mma                                 │
+│   CORS_ORIGINS=http://localhost:5173                                │
 └─────────────────────────────────────────────────────────────────────┘
                               │
                               │  SPARQL 1.1 Query/Update Protocol
@@ -234,8 +240,18 @@ On profile load:
 ### How the backend uses a profile
 
 1. On startup, load every profile's `ontology.ttl` into a named graph `g:ontology:<id>`.
-2. On annotation write, the gateway looks up which profile the annotation belongs to (via an `interim:profile` predicate, or via the container if containers are profile-keyed).
+2. On annotation write, the gateway looks up which profile the annotation belongs to via the **`mma:profile`** predicate on the annotation (the tool-owned namespace, configurable via `BASE_NS`). Containers may also be profile-keyed.
 3. (Phase 3+) Validate the annotation against the profile's `shapes.ttl` before committing.
+
+### Tool namespace (`mma:`)
+
+`mma:` is the namespace owned by the annotator tool itself (distinct from any profile's ontology). It carries predicates that describe how an annotation was created by *this* tool — currently just `mma:profile`, but extensible (e.g. `mma:createdWithVersion`, `mma:annotationLevel` in Phase 3).
+
+```
+mma:  https://w3id.org/multimodal-annotator/ns/
+```
+
+The base is read from the `BASE_NS` environment variable at gateway startup. Changing `BASE_NS` rebases every `mma:*` term and is the single point of edit if the canonical tool URI changes.
 
 ---
 
@@ -248,7 +264,8 @@ A linking annotation (text → image, with GEKO denotation) under the default pr
 @prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix lrmoo: <http://iflastandards.info/ns/lrm/lrmoo/> .
 @prefix geko:  <https://w3id.org/geko/> .
-@prefix hico:  <http://purl.org/emmedi/hico/> .
+@prefix hico:  <https://w3id.org/hico/> .
+@prefix mma:   <https://w3id.org/multimodal-annotator/ns/> .
 
 GRAPH <https://anno.example.org/annotations/a-2026-05-12T184200Z> {
 
@@ -260,7 +277,7 @@ GRAPH <https://anno.example.org/annotations/a-2026-05-12T184200Z> {
       dcterms:created "2026-05-12T18:42:00Z"^^xsd:dateTime ;
       hico:wasGeneratedBy <a-2026-05-12T184200Z/interpretation> ;
       geko:hasEkphrasticModality geko:denotation ;
-      interim:profile <https://w3id.org/interim/profiles/interim-geko> .
+      mma:profile <https://w3id.org/multimodal-annotator/profiles/interim-geko> .
 
   <a-2026-05-12T184200Z/body>
       a oa:TextualBody, lrmoo:F2_Expression ;
@@ -304,7 +321,7 @@ These are invariants the system MUST satisfy:
 
 1. **An annotation POSTed as JSON-LD, GETted later, must expand to the same RDF triples.** This is verified by `pyld.jsonld.expand(...)` equivalence.
 2. **An annotation displayed in the UI, exported, and reloaded, must reproduce the same visual state.** This is the bug we're fixing in T1.6.
-3. **An annotation created under profile A and viewed under profile B must remain identifiable as "from profile A"** via the `interim:profile` predicate (the `interim:` prefix here is the tool's namespace, kept for legacy; rename can come later).
+3. **An annotation created under profile A and viewed under profile B must remain identifiable as "from profile A"** via the `mma:profile` predicate (tool-owned namespace `https://w3id.org/multimodal-annotator/ns/`, base configurable via `BASE_NS`).
 4. **The `@context` URL referenced in any exported annotation must resolve to a stable, versioned JSON-LD context** served from the backend. No floating definitions.
 
 ---

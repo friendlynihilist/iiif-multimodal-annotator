@@ -22,8 +22,8 @@ The author also wants to support single-medium use: a user who only wants to ann
 Rename the tool to **Multimodal Annotator** (working title; potentially shortened to MMA).
 
 Specifically:
-- The repository will move from `iiif-interim-annotator` to `multimodal-annotator`.
-- The npm package and CLI commands change accordingly.
+- The repository moves to **`iiif-multimodal-annotator`** (the IIIF prefix is retained for discoverability among IIIF-community contributors and search engines; this supersedes the original proposal of bare `multimodal-annotator` in this ADR). The rename was executed on 2026-05-13.
+- The npm package name matches the repo: `iiif-multimodal-annotator`.
 - The custom HTML element renames from `<iiif-interim-annotator>` to `<multimodal-annotator>` over the course of Phase 1, with a deprecation alias kept until the JOCCH submission.
 - `INTERIM` becomes the identifier of the default profile (`profiles/interim-geko/`), not of the tool.
 

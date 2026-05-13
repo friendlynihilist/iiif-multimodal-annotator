@@ -1,0 +1,99 @@
+{
+  "$schema": "https://w3id.org/multimodal-annotator/profile-manifest.schema.json",
+  "id": "interim-geko",
+  "name": "INTERIM / GEKO Ekphrasis",
+  "description": "Default profile of the Multimodal Annotator. Models intermedial relations and ekphrasis under INTERIM + GEKO, with LRMoo as upper-level model and MLAO/ICON for multi-level annotation hooks.",
+  "version": "0.1.0",
+  "authors": [
+    { "name": "Carlo Teo Pedretti", "orcid": "https://orcid.org/0000-0002-4115-0078" }
+  ],
+  "license": "CC-BY-4.0",
+
+  "context": "context.jsonld",
+  "ontology": "ontology.ttl",
+  "shapes": "shapes.ttl",
+
+  "namespaces": {
+    "mma":     "https://w3id.org/multimodal-annotator/ns/",
+    "interim": "https://w3id.org/interim/",
+    "geko":    "https://w3id.org/geko/",
+    "mlao":    "https://w3id.org/mlao/",
+    "icon":    "https://w3id.org/icon/ontology/",
+    "hico":    "https://w3id.org/hico/",
+    "lrmoo":   "http://iflastandards.info/ns/lrm/lrmoo/",
+    "crm":     "http://www.cidoc-crm.org/cidoc-crm/"
+  },
+
+  "entityClasses": [
+    {
+      "id": "lrmoo:F1_Work",
+      "label": "Work",
+      "description": "Distinct intellectual creation realised through expressions. Used for paintings, sculptures, films — the iconic referent of an ekphrasis.",
+      "applicableTo": ["image"],
+      "color": null
+    },
+    {
+      "id": "lrmoo:F2_Expression",
+      "label": "Expression",
+      "description": "The actualisation of a Work — a specific text (a manuscript, a printed page, a transcription).",
+      "applicableTo": ["text"],
+      "color": null
+    },
+    {
+      "id": "interim:IntermedialObject",
+      "label": "Intermedial Object",
+      "description": "The resulting object produced by an intermedial relation.",
+      "applicableTo": ["text", "image"],
+      "color": null
+    }
+  ],
+
+  "linkingProperties": [
+    {
+      "id": "geko:denotation",
+      "label": "Denotation",
+      "description": "Direct referential link from text to image.",
+      "color": "#2196F3",
+      "shortcut": "D",
+      "domain": "lrmoo:F2_Expression",
+      "range": "lrmoo:F1_Work"
+    },
+    {
+      "id": "geko:dynamisation",
+      "label": "Dynamisation",
+      "description": "Temporal / movement-based ekphrastic link.",
+      "color": "#FF5722",
+      "shortcut": "Y",
+      "domain": "lrmoo:F2_Expression",
+      "range": "lrmoo:F1_Work"
+    },
+    {
+      "id": "geko:integration",
+      "label": "Integration",
+      "description": "Interpretive ekphrastic blend.",
+      "color": "#9C27B0",
+      "shortcut": "I",
+      "domain": "lrmoo:F2_Expression",
+      "range": "lrmoo:F1_Work"
+    }
+  ],
+
+  "tagSchemes": [
+    {
+      "id": "geko:modalitiesScheme",
+      "label": "Ekphrastic Modalities",
+      "type": "skos:ConceptScheme"
+    }
+  ],
+
+  "annotationMotivations": ["linking", "commenting", "tagging", "transcribing"],
+  "panelTypes": ["text", "image", "facsimile", "sparql"],
+
+  "annotationLevels": [
+    { "id": "icon:PreiconographicalSubject", "label": "Pre-iconographical" },
+    { "id": "icon:IconographicalSubject",    "label": "Iconographical" },
+    { "id": "icon:IconologicalSubject",      "label": "Iconological" }
+  ],
+
+  "authorityServices": []
+}

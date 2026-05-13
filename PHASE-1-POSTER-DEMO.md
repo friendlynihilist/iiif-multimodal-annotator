@@ -30,28 +30,46 @@ Day  1 June          ▕░░░░░░░░░░░░░░░░░░�
   /examples/          ← demo data, sample annotations
   /docker-compose.yml ← orchestration
   ```
-- Move `ontology/interim.ttl` to `profiles/interim-geko/ontology.ttl` (do not delete original yet — leave a symlink or note).
+- Move `ontology/interim.ttl` to `profiles/interim-geko/ontology.ttl` (do not delete original yet — leave a note pointing to the new location).
+- **Apply the Phase 1 rename** (external identifiers only — see CLAUDE.md §"Phase 1 rename scope"):
+  - Rename file `src/components/iiif-interim-annotator.js` → `src/components/multimodal-annotator.js` (use `git mv` to preserve history).
+  - Register the primary custom element tag `<multimodal-annotator>`. Also register the deprecated alias `<iiif-interim-annotator>` as a thin subclass that emits a `console.warn`.
+  - Update `src/index.js` import paths and re-export the class under both `IIIFInterimAnnotator` (kept) and `MultimodalAnnotator` (new alias).
+  - Update `examples/index.html`: replace `<iiif-interim-annotator>` with `<multimodal-annotator>`, change `<title>` to "Multimodal Annotator — Demo".
+  - Update `package.json` `name` to `iiif-multimodal-annotator`.
+  - Update README and PROJECT-OVERVIEW headings (full README rewrite happens in T3.2).
+  - **Do NOT touch**: CSS variable `--color-black`, CSS class names, custom event names, the `IIIFInterimAnnotator` JS class name, `<iiif-text-panel>` / `<iiif-image-panel>` tags.
 - Add `CHANGELOG.md` with a `## [Unreleased]` section.
 
-**DONE WHEN**: new structure exists, frontend still builds and runs with `npm run dev`.
+**DONE WHEN**: new structure exists, frontend still builds and runs with `npm run dev`, `<multimodal-annotator>` is the canonical tag in the demo HTML, and `<iiif-interim-annotator>` still works (with a console warning) for backwards compatibility.
 
 ### T1.2 — JSON-LD `@context` for the default profile
 
 This is the prerequisite to RDF anything. See `contexts/multimodal-context.jsonld` for the seed file — extend / verify it.
 
-- Make sure every term used in the v1 export (`oa:`, `lrmoo:`, `geko:`, `interim:`, `miro:`, `mlao:`, `icon:`, `hico:`, `crm:`, `skos:`, `dcterms:`) is in the context.
+- Make sure every term used in the v1 export (`oa:`, `lrmoo:`, `geko:`, `interim:`, `miro:`, `mlao:`, `icon:`, `hico:`, `crm:`, `skos:`, `dcterms:`) is in the context, **plus the new `mma:` namespace** (`https://w3id.org/multimodal-annotator/ns/`).
 - For each term, decide `@id` and `@type` (especially `@type: @id` for URI-valued properties).
+- **HICO namespace is `https://w3id.org/hico/`** (NOT `http://purl.org/emmedi/hico/`). Fix in both the `@context` and the v1 `ontology/interim.ttl` (which currently uses the old URI) before round-trip testing.
+- The `profile` term resolves to `mma:profile`, not `interim:profile`.
 - Serve the context from the backend (next task) at `/contexts/interim-geko.jsonld` and also save a copy in `contexts/`.
 - Validate with `pyld` (or any JSON-LD processor): `pyld.jsonld.expand(annotation_export)` must round-trip cleanly.
 
-**DONE WHEN**: a v1 export, replayed with the new context, expands to RDF triples without dropped terms.
+**DONE WHEN**: a v1 export (with HICO + `profile` predicate updated) replayed through the new context expands to RDF triples without dropped terms.
 
 ### T1.3 — Backend skeleton (FastAPI + Fuseki via Docker Compose)
 
 - `docker-compose.yml` with two services:
   - `fuseki`: official `secoresearch/fuseki` or `stain/jena-fuseki` image, TDB2, persistent volume.
   - `backend`: built from `backend/Dockerfile` (Python 3.11, FastAPI, uvicorn).
-- Backend dependencies (`pyproject.toml` or `requirements.txt`): `fastapi`, `uvicorn`, `rdflib`, `pyld`, `httpx`, `python-multipart`.
+- Backend dependencies (`pyproject.toml` or `requirements.txt`): `fastapi`, `uvicorn`, `rdflib`, `pyld`, `httpx`, `python-multipart`, `python-dotenv`.
+- Add a root-level `.env.example` (committed) with:
+  ```
+  BASE_NS=https://w3id.org/multimodal-annotator/ns/
+  DEFAULT_CREATOR_IRI=https://orcid.org/0000-0002-4115-0078
+  FUSEKI_URL=http://fuseki:3030/mma
+  CORS_ORIGINS=http://localhost:5173
+  ```
+  Backend reads env on startup; `BASE_NS` and `DEFAULT_CREATOR_IRI` are used by the SPARQL Update builder and the HICO provenance generator respectively. Enable CORS for `CORS_ORIGINS` so the Vite dev server can call the API.
 - Backend skeleton routes (all stubbed initially):
   - `GET  /health`
   - `GET  /profiles` → list available profiles
@@ -159,15 +177,18 @@ Document `profiles/<id>/manifest.json` schema. See `docs/architecture/ARCHITECTU
 
 **DONE WHEN**: the profile bundle is complete and the backend `GET /profiles/interim-geko` returns it.
 
-### T2.3 — Build a second profile for pluggability proof
+### T2.3 — Build the `cidoc-crm-bare` profile (locked)
 
-Decide one of:
-- **`cidoc-crm-bare`** — generic CH annotations: classes are `E22_Human-Made_Object`, `E36_Visual_Item`, `E33_Linguistic_Object`; linking property is `P138_represents`. Single modality, simpler UI. Good for showing "you don't need GEKO".
-- **`iconclass`** — tagging-only profile (no linking properties). Each annotation is a tag with a `skos:Concept` from Iconclass. Good for showing the tool degrades gracefully to single-modality use.
+The second profile is **`cidoc-crm-bare`**: the same cross-modal scenario as the default, modelled with CIDOC-CRM instead of GEKO.
 
-Pick one. Build the corresponding manifest + minimal ontology + context. **The point is to demonstrate the pluggability concretely in the demo.**
+- Entity classes: `crm:E22_Human-Made_Object` (for images), `crm:E36_Visual_Item` (for images / regions), `crm:E33_Linguistic_Object` (for text).
+- Single linking property: `crm:P138_represents` (text region → image region or visual item → human-made object, depending on the modelling stance the profile picks — document the choice in the profile README).
+- **No modality multiplicity**: a single linking property, single color (use a neutral indigo for clarity in side-by-side screenshots).
+- Tag schemes: none (Phase 1).
 
-**DONE WHEN**: backend exposes two profiles; switching between them in the UI changes which classes / properties / colors are visible.
+Build the corresponding `manifest.json` + minimal `ontology.ttl` + `context.jsonld`. **The point is to demonstrate pluggability concretely in the demo** — same regions, same artworks, different ontological framing.
+
+**DONE WHEN**: backend exposes both `interim-geko` and `cidoc-crm-bare`; switching profile in the UI changes the modality button(s), color(s), and the `@context` used on save; existing annotations under the other profile render greyed-out with a "different profile" badge.
 
 ### T2.4 — Profile picker UI
 
@@ -242,6 +263,26 @@ A day-of-demo checklist in `docs/demo-checklist.md`:
 - A "reset demo" button or script that re-seeds the database with the demo dataset in <30 seconds, in case something goes wrong mid-demo.
 
 **DONE WHEN**: the checklist exists and has been walked through at least twice from a clean machine.
+
+### T3.5 — STRETCH: Iconclass authority service for tagging
+
+> Cuttable if Week 3 runs over. The poster works without this, but it's the kind of detail that lands well in a live demo and in screenshots.
+
+- Add a minimal authority-service hook callable from the "tag" annotation flow on any panel (independent of the active profile — applicable to every profile that declares `tagging` in `annotationMotivations`).
+- UI: when the user clicks "tag", show an autocomplete input that queries `https://iconclass.org/{notation}.json` as the user types a notation prefix. Display matching entries (notation + textual correlate).
+- Selecting a result writes the annotation body as:
+  ```json
+  {
+    "type": "SpecificResource",
+    "source": "https://iconclass.org/{notation}",
+    "purpose": "tagging"
+  }
+  ```
+  with the body's RDF type being `skos:Concept` and `rdfs:label` carrying the textual correlate.
+- The Iconclass IRI is dereferenceable — no further configuration needed.
+- Document the dependency on the public `iconclass.org` JSON API; pre-cache the lookups for the demo dataset so the live demo doesn't depend on conference WiFi.
+
+**DONE WHEN**: the user can tag a selection with an Iconclass concept via autocomplete; the saved annotation body references `https://iconclass.org/...`; SPARQL `SELECT ?notation WHERE { ?body a skos:Concept ; oa:hasSource ?notation . FILTER(CONTAINS(STR(?notation), "iconclass.org")) }` returns the tagged concept.
 
 ---
 
