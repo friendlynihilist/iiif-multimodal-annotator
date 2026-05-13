@@ -44,6 +44,19 @@ function nextTempIri() {
   return `${TEMP_IRI_PREFIX}${Date.now().toString(36)}-${tempCounter}`;
 }
 
+/** Map an Error to a coarse category the UI can colour-code. */
+function classifyError(error) {
+  const status = error?.status;
+  if (status === undefined) return "network";          // fetch threw
+  if (status >= 400 && status < 500) return "validation";
+  return "server";                                     // 5xx and anything else
+}
+
+function shortMessage(op, error) {
+  if (error?.status) return `${op} failed: HTTP ${error.status}`;
+  return `${op} failed: ${error?.message || "unknown error"}`;
+}
+
 function iriToContainerAndId(iri) {
   // …/annotations/<container>/<id>   (and optionally /interpretation/<id>)
   // We only need the (container, id) for the annotation itself.
@@ -128,7 +141,11 @@ export class AnnotationStore extends EventTarget {
     try {
       page = await this._request("GET", this._url(container));
     } catch (error) {
-      this._emit("store:error", { op: "load", error });
+      this._emit("store:error", {
+        op: "load", error,
+        kind: classifyError(error),
+        message: shortMessage("load", error),
+      });
       throw error;
     }
 
@@ -142,8 +159,13 @@ export class AnnotationStore extends EventTarget {
   }
 
   /** Create an annotation. Optimistic: emits `created` immediately with a
-   *  temp IRI, then `updated` after the server assigns the real IRI. */
-  async create(container, body) {
+   *  temp IRI, then `updated` after the server assigns the real IRI.
+   *
+   *  `meta` is an opaque object the caller can pass to correlate the event
+   *  flow with its own bookkeeping (e.g. the DOM elements representing the
+   *  pending annotation). It's echoed back on every event emitted for this
+   *  particular call. */
+  async create(container, body, meta) {
     const tempIri = nextTempIri();
     const optimistic = { ...body, id: tempIri };
     this.cache.set(tempIri, optimistic);
@@ -151,6 +173,7 @@ export class AnnotationStore extends EventTarget {
       annotation: optimistic,
       optimistic: true,
       tempIri,
+      meta,
     });
 
     let saved;
@@ -158,14 +181,22 @@ export class AnnotationStore extends EventTarget {
       saved = await this._request("POST", this._url(container), body);
     } catch (error) {
       this.cache.delete(tempIri);
-      this._emit("store:error", { op: "create", error, tempIri });
+      this._emit("store:error", {
+        op: "create", error, tempIri, meta,
+        kind: classifyError(error),
+        message: shortMessage("create", error),
+      });
       throw error;
     }
 
     if (!saved || !saved.id) {
       this.cache.delete(tempIri);
       const error = new Error("Server response missing annotation id");
-      this._emit("store:error", { op: "create", error, tempIri });
+      this._emit("store:error", {
+        op: "create", error, tempIri, meta,
+        kind: "server",
+        message: shortMessage("create", error),
+      });
       throw error;
     }
 
@@ -175,19 +206,20 @@ export class AnnotationStore extends EventTarget {
       annotation: saved,
       previous: optimistic,
       tempIri,
+      meta,
     });
     return saved;
   }
 
   /** Replace an annotation. Optimistic: applies locally first, rolls back on error. */
-  async update(iri, body) {
+  async update(iri, body, meta) {
     const previous = this.cache.get(iri);
     const { container, id } = iriToContainerAndId(iri);
 
     // Optimistic apply.
     const optimistic = { ...body, id: iri };
     this.cache.set(iri, optimistic);
-    this._emit("annotation:updated", { annotation: optimistic, previous });
+    this._emit("annotation:updated", { annotation: optimistic, previous, meta });
 
     let saved;
     try {
@@ -196,11 +228,16 @@ export class AnnotationStore extends EventTarget {
       // Rollback.
       if (previous) this.cache.set(iri, previous);
       else this.cache.delete(iri);
-      this._emit("store:error", { op: "update", error, iri });
+      this._emit("store:error", {
+        op: "update", error, iri, meta,
+        kind: classifyError(error),
+        message: shortMessage("update", error),
+      });
       // Emit a corrective updated so listeners can snap back to `previous`.
       this._emit("annotation:updated", {
         annotation: previous,
         previous: optimistic,
+        meta,
       });
       throw error;
     }
@@ -210,18 +247,19 @@ export class AnnotationStore extends EventTarget {
       this._emit("annotation:updated", {
         annotation: saved,
         previous: optimistic,
+        meta,
       });
     }
     return saved;
   }
 
   /** Delete an annotation. Optimistic: removes locally, reinstates on error. */
-  async remove(iri) {
+  async remove(iri, meta) {
     const previous = this.cache.get(iri);
     const { container, id } = iriToContainerAndId(iri);
 
     this.cache.delete(iri);
-    this._emit("annotation:removed", { iri });
+    this._emit("annotation:removed", { iri, meta });
 
     try {
       await this._request("DELETE", this._url(container, id));
@@ -232,9 +270,14 @@ export class AnnotationStore extends EventTarget {
         this._emit("annotation:created", {
           annotation: previous,
           optimistic: false,
+          meta,
         });
       }
-      this._emit("store:error", { op: "remove", error, iri });
+      this._emit("store:error", {
+        op: "remove", error, iri, meta,
+        kind: classifyError(error),
+        message: shortMessage("remove", error),
+      });
       throw error;
     }
   }

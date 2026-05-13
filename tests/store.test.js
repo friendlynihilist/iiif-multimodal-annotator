@@ -263,6 +263,67 @@ describe("AnnotationStore.remove (optimistic)", () => {
   });
 });
 
+describe("store:error payload", () => {
+  test("network error gets kind='network' and a human message", async () => {
+    const fetchImpl = async () => {
+      throw new TypeError("fetch failed");
+    };
+    const store = new AnnotationStore({ baseUrl: BASE, fetchImpl });
+    const errors = [];
+    store.on("store:error", (e) => errors.push(e.detail));
+    await assert.rejects(() => store.create(CONTAINER, newAnnotationBody()));
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].kind, "network");
+    assert.match(errors[0].message, /create failed/i);
+  });
+
+  test("HTTP 400 gets kind='validation'", async () => {
+    const fetchImpl = makeFetchMock({
+      [`POST ${BASE}/w3c/${CONTAINER}/`]: async () =>
+        buildResponse({ status: 400, body: "bad" }),
+    });
+    const store = new AnnotationStore({ baseUrl: BASE, fetchImpl });
+    const errors = [];
+    store.on("store:error", (e) => errors.push(e.detail));
+    await assert.rejects(() => store.create(CONTAINER, newAnnotationBody()));
+    assert.equal(errors[0].kind, "validation");
+  });
+
+  test("HTTP 500 gets kind='server'", async () => {
+    const fetchImpl = makeFetchMock({
+      [`POST ${BASE}/w3c/${CONTAINER}/`]: async () =>
+        buildResponse({ status: 500, body: "boom" }),
+    });
+    const store = new AnnotationStore({ baseUrl: BASE, fetchImpl });
+    const errors = [];
+    store.on("store:error", (e) => errors.push(e.detail));
+    await assert.rejects(() => store.create(CONTAINER, newAnnotationBody()));
+    assert.equal(errors[0].kind, "server");
+  });
+});
+
+describe("meta propagation", () => {
+  test("create echoes `meta` on both 'annotation:created' and 'annotation:updated'", async () => {
+    const fetchImpl = makeFetchMock({
+      [`POST ${BASE}/w3c/${CONTAINER}/`]: async () =>
+        buildResponse({
+          status: 201,
+          body: newServerSaved(),
+          headers: { "content-type": "application/ld+json" },
+        }),
+    });
+    const store = new AnnotationStore({ baseUrl: BASE, fetchImpl });
+    const ref = { tag: "my-ref" };
+    const seen = [];
+    store.on("annotation:created", (e) => seen.push({ ev: "created", meta: e.detail.meta }));
+    store.on("annotation:updated", (e) => seen.push({ ev: "updated", meta: e.detail.meta }));
+    await store.create(CONTAINER, newAnnotationBody(), ref);
+    assert.equal(seen.length, 2);
+    assert.equal(seen[0].meta, ref);
+    assert.equal(seen[1].meta, ref);
+  });
+});
+
 describe("on/off return-value", () => {
   test("on() returns an unsubscriber", () => {
     const store = new AnnotationStore({ baseUrl: BASE, fetchImpl: async () => ({}) });

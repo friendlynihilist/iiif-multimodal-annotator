@@ -12,6 +12,7 @@
 import './components/multimodal-annotator.js';
 import './components/iiif-text-panel.js';
 import './components/iiif-image-panel.js';
+import './components/mma-toast-stack.js';
 
 // Programmatic exports. `MultimodalAnnotator` is the canonical alias; the legacy
 // `IIIFInterimAnnotator` name is kept for v0.2.x compatibility.

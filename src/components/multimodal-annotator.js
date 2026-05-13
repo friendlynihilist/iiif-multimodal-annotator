@@ -1,3 +1,9 @@
+import { AnnotationStore } from '../store/annotation-store.js';
+
+const CONTAINER_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const DEFAULT_CONTAINER = 'demo-bologna';
+const DEFAULT_BACKEND_URL = 'http://localhost:8000';
+
 /**
  * Main container component for the Multimodal Annotator
  * (was: IIIF INTERIM Annotator — Phase 1 partial rename, see ADR 0001 and CLAUDE.md §"Phase 1 rename scope").
@@ -14,7 +20,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this.annotations = [];
+    this.annotations = []; // Phase 1: a mirror of `this.store.all()`, kept for backwards compatibility with legacy consumers and `exportAnnotations()`. The store is the source of truth.
     this.selectedTextRange = null;
     this.selectedImageRegion = null;
     this.connections = []; // Store connections for redrawing
@@ -25,6 +31,11 @@ export class IIIFInterimAnnotator extends HTMLElement {
     this.panels = []; // Dynamic panel configuration
     this.panelIdCounter = 0;
     this.connectionIndicators = new Map(); // Track indicator circles for off-screen connections
+
+    // T1.5b store integration
+    this.store = null;             // populated in _initStore()
+    this.container = null;         // resolved in _initStore()
+    this._toastStack = null;       // populated after render()
   }
 
   connectedCallback() {
@@ -32,6 +43,8 @@ export class IIIFInterimAnnotator extends HTMLElement {
     this.setupEventListeners();
     this.setupScrollListeners();
     this.initializePanels();
+    // Fire-and-forget; store errors surface through the toast stack.
+    this._initStore();
   }
 
   disconnectedCallback() {
@@ -46,6 +59,94 @@ export class IIIFInterimAnnotator extends HTMLElement {
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
     }
+  }
+
+  // ── T1.5b store integration ─────────────────────────────────────────
+
+  _resolveContainer() {
+    // Order: ?container=… in URL → localStorage → DEFAULT_CONTAINER.
+    // Mismatch on the regex => fall back + warn (don't surprise the user).
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const fromUrl = params.get('container');
+      if (fromUrl && CONTAINER_RE.test(fromUrl)) {
+        try { localStorage.setItem('mma:lastContainer', fromUrl); } catch (_) {}
+        return fromUrl;
+      }
+      if (fromUrl) {
+        console.warn(`[MMA] ignored invalid ?container=${fromUrl}; expected ${CONTAINER_RE}`);
+      }
+      const stored = (() => {
+        try { return localStorage.getItem('mma:lastContainer'); } catch (_) { return null; }
+      })();
+      if (stored && CONTAINER_RE.test(stored)) return stored;
+    } catch (_) { /* fall through to default */ }
+    return DEFAULT_CONTAINER;
+  }
+
+  _initStore() {
+    this.container = this._resolveContainer();
+    const backendUrl = this.getAttribute('backend-url') || DEFAULT_BACKEND_URL;
+    this.store = new AnnotationStore({ baseUrl: backendUrl });
+    this._toastStack = this.shadowRoot.getElementById('toast-stack');
+
+    console.log(`[MMA] container="${this.container}" backend=${backendUrl}`);
+
+    // ── Adapter: store events → legacy kebab-case CustomEvents on `this`.
+    // External consumers keep listening to the legacy names; Phase 3 will
+    // replace this mapping with native colon-style events.
+    this.store.on('annotation:created', (e) => {
+      const { annotation, optimistic, tempIri, meta } = e.detail;
+      if (optimistic) {
+        // Stamp the DOM element with the temp IRI so deletion paths can
+        // find it later. Real IRI gets stamped on 'annotation:updated'.
+        if (meta?.element) meta.element.dataset.annotationIri = tempIri;
+        if (meta?.connection) meta.connection.annotationIri = tempIri;
+      }
+      this.dispatchEvent(new CustomEvent('annotation-created', {
+        detail: annotation, bubbles: true, composed: true,
+      }));
+    });
+
+    this.store.on('annotation:updated', (e) => {
+      const { annotation, tempIri, meta } = e.detail;
+      // Swap temp IRI → real IRI on the visual references.
+      if (tempIri && annotation?.id && annotation.id !== tempIri) {
+        if (meta?.element) meta.element.dataset.annotationIri = annotation.id;
+        if (meta?.connection) meta.connection.annotationIri = annotation.id;
+        // Keep `this.annotations` mirror coherent.
+        const tmpIdx = this.annotations.findIndex((a) => a?.id === tempIri);
+        if (tmpIdx >= 0) this.annotations[tmpIdx] = annotation;
+        else this.annotations.push(annotation);
+      } else if (annotation?.id) {
+        const idx = this.annotations.findIndex((a) => a?.id === annotation.id);
+        if (idx >= 0) this.annotations[idx] = annotation;
+      }
+      this.dispatchEvent(new CustomEvent('annotation-updated', {
+        detail: annotation, bubbles: true, composed: true,
+      }));
+      this.dispatchEvent(new CustomEvent('annotations-updated', {
+        detail: { annotations: this.annotations },
+      }));
+    });
+
+    this.store.on('annotation:removed', (e) => {
+      const { iri } = e.detail;
+      const idx = this.annotations.findIndex((a) => a?.id === iri);
+      if (idx >= 0) this.annotations.splice(idx, 1);
+      this.dispatchEvent(new CustomEvent('annotation-removed', {
+        detail: { iri }, bubbles: true, composed: true,
+      }));
+    });
+
+    this.store.on('store:error', (e) => {
+      const { op, error, kind, message } = e.detail;
+      console.warn('[MMA Store]', op, error);
+      this._toastStack?.push?.({ kind, message });
+    });
+
+    // Initial load. Errors are non-fatal and surface via the toast stack.
+    this.store.load(this.container).catch(() => { /* surfaced by store:error */ });
   }
 
   render() {
@@ -1199,6 +1300,9 @@ export class IIIFInterimAnnotator extends HTMLElement {
       <!-- Global annotation sidebar -->
       <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
       <div class="annotation-sidebar" id="annotation-sidebar"></div>
+
+      <!-- Non-blocking toast stack for store errors (T1.5b) -->
+      <mma-toast-stack id="toast-stack"></mma-toast-stack>
     `;
   }
 
@@ -1245,32 +1349,54 @@ export class IIIFInterimAnnotator extends HTMLElement {
       }
     });
 
-    // Listen for standalone text annotations (comment, tag)
+    // Listen for standalone text annotations (comment, tag).
+    // The child-panel CustomEvent carries `{element, selection, annotationType, body}`.
+    // The orchestrator's OWN re-emitted `annotation-created` (kebab-case adapter
+    // for store events) carries the JSON-LD annotation directly — distinguish
+    // by the presence of `e.detail.element`.
     this.addEventListener('annotation-created', (e) => {
+      if (!e.detail || !e.detail.element) return; // not from a child panel
       const { element, selection, annotationType, body } = e.detail;
 
-      // Create standalone annotation (not linked to image)
       const annotation = this.createStandaloneAnnotation(selection, annotationType, body);
-      this.annotations.push(annotation);
+      // Strip client-side id; let the backend mint a ULID.
+      delete annotation.id;
+      delete annotation['@context'];
+
+      this.store?.create(this.container, annotation, { element })
+        .catch(() => { /* surfaced via store:error → toast */ });
 
       this.updateStatus(`${annotationType} annotation created`);
-      this.dispatchEvent(new CustomEvent('annotations-updated', {
-        detail: { annotations: this.annotations }
-      }));
     });
 
-    // Listen for standalone image annotations (comment, tag)
+    // Listen for standalone image annotations (comment, tag) — same pattern.
     this.addEventListener('image-annotation-created', (e) => {
+      if (!e.detail || !e.detail.element) return;
       const { element, selection, annotationType, body } = e.detail;
 
-      // Create standalone image annotation
       const annotation = this.createStandaloneImageAnnotation(selection, annotationType, body);
-      this.annotations.push(annotation);
+      delete annotation.id;
+      delete annotation['@context'];
+
+      this.store?.create(this.container, annotation, { element })
+        .catch(() => { /* toast */ });
 
       this.updateStatus(`Image ${annotationType} annotation created`);
-      this.dispatchEvent(new CustomEvent('annotations-updated', {
-        detail: { annotations: this.annotations }
-      }));
+    });
+
+    // Standalone annotation DELETE — children emit annotation-deleted /
+    // image-annotation-deleted; route them through the store.
+    this.addEventListener('annotation-deleted', (e) => {
+      const iri = e.detail?.element?.dataset?.annotationIri;
+      if (iri && this.store) {
+        this.store.remove(iri).catch(() => {});
+      }
+    });
+    this.addEventListener('image-annotation-deleted', (e) => {
+      const iri = e.detail?.element?.dataset?.annotationIri;
+      if (iri && this.store) {
+        this.store.remove(iri).catch(() => {});
+      }
     });
 
     // Listen for show comment sidebar requests
@@ -2156,16 +2282,27 @@ export class IIIFInterimAnnotator extends HTMLElement {
       this.drawConnectionLineBetween(textElement, imageRect, modality);
     }
 
-    this.annotations.push(annotation);
+    // Push to the backend via the store. The visual rect/line are already
+    // drawn at this point; the store fires 'annotation:created' with the
+    // optimistic temp IRI immediately (the orchestrator adapter stamps it
+    // onto `connection.annotationIri`), then 'annotation:updated' with
+    // the real IRI once the POST settles. On failure the toast surfaces it.
+    const connection = this.connections[this.connections.length - 1];
+    // Strip transient/client-side fields the server will (re)mint.
+    const payload = { ...annotation };
+    delete payload.id;
+    delete payload['@context'];
+    delete payload.created;
+    if (this.store) {
+      this.store.create(this.container, payload, { connection })
+        .catch(() => { /* toast */ });
+    }
 
     // DON'T remove from unlinked lists - keep them draggable for multiple connections!
     // Elements stay draggable and can be connected multiple times
 
-    this.dispatchEvent(new CustomEvent('annotation-created', {
-      detail: annotation,
-      bubbles: true,
-      composed: true
-    }));
+    // (The store-adapter re-emits 'annotation-created' downstream with the
+    // saved annotation IRI; consumers should listen to that.)
 
     // Count connections for this text and image
     const textConnections = this.connections.filter(c => c.textElement === textElement).length;
@@ -2297,16 +2434,26 @@ export class IIIFInterimAnnotator extends HTMLElement {
     const connection = this.connections[connectionIndex];
     if (!connection) return;
 
-    const annotation = this.annotations[connection.annotationIndex];
+    // Prefer the store cache (post-T1.5b source of truth); fall back to
+    // the legacy in-memory array index for any pre-store rows.
+    const annotation = (this.store && connection.annotationIri
+                          ? this.store.get(connection.annotationIri)
+                          : null)
+                       || this.annotations[connection.annotationIndex];
     if (annotation) {
+      const value = annotation.body?.value || annotation.body?.[0]?.value || '';
+      const canvasLabel = annotation.target?.canvasLabel
+                          || annotation.target?.[0]?.canvasLabel
+                          || 'Unknown';
+      const created = annotation.created || annotation['dcterms:created'] || '';
       const info = `
 Annotation Details:
 - Modality: ${connection.modality}
-- Text: "${annotation.body.value.substring(0, 50)}${annotation.body.value.length > 50 ? '...' : ''}"
-- Canvas: ${annotation.target.canvasLabel || 'Unknown'}
-- Created: ${new Date(annotation.created).toLocaleString()}
+- IRI: ${connection.annotationIri || '(no IRI yet — POST pending)'}
+- Text: "${String(value).substring(0, 50)}${String(value).length > 50 ? '...' : ''}"
+- Canvas: ${canvasLabel}
+- Created: ${created ? new Date(created).toLocaleString() : '(unknown)'}
       `.trim();
-
       alert(info);
     }
 
@@ -2317,15 +2464,19 @@ Annotation Details:
     const connection = this.connections[connectionIndex];
     if (!connection) return;
 
-    // Remove visual elements
+    // Remove visual elements immediately (optimistic).
     if (connection.path) connection.path.remove();
     if (connection.label) connection.label.remove();
-
-    // Remove from connections array
     this.connections.splice(connectionIndex, 1);
 
-    // Remove annotation
-    if (connection.annotationIndex !== undefined) {
+    // Delegate the data deletion to the store. Errors surface as toasts;
+    // we don't undo the visual removal because Phase 1 keeps the optimistic
+    // pattern minimal — the user can recreate from scratch if the server
+    // disagrees.
+    if (this.store && connection.annotationIri) {
+      this.store.remove(connection.annotationIri).catch(() => { /* toast */ });
+    } else if (connection.annotationIndex !== undefined) {
+      // Pre-store mirror cleanup for any legacy entry.
       this.annotations.splice(connection.annotationIndex, 1);
     }
 
@@ -2502,12 +2653,16 @@ Annotation Details:
   }
 
   exportAnnotations() {
+    // Source of truth is the store cache after T1.5b. Fall back to the
+    // in-memory mirror for any pre-store rows or store-not-yet-ready edge.
+    const items = (this.store ? this.store.all() : null) || this.annotations;
+
     const annotationList = {
       '@context': 'http://www.w3.org/ns/anno.jsonld',
       type: 'AnnotationCollection',
-      label: 'INTERIM Annotations',
+      label: 'Multimodal Annotator export',
       created: new Date().toISOString(),
-      items: this.annotations
+      items,
     };
 
     const blob = new Blob([JSON.stringify(annotationList, null, 2)], {
@@ -2516,15 +2671,15 @@ Annotation Details:
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `interim-annotations-${Date.now()}.json`;
+    a.download = `mma-annotations-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
 
-    this.updateStatus('Annotations exported');
+    this.updateStatus(`Exported ${items.length} annotation(s)`);
   }
 
   getAnnotations() {
-    return this.annotations;
+    return this.store ? this.store.all() : this.annotations;
   }
 
   loadAnnotations(annotations) {

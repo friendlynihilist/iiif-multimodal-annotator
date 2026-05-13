@@ -8,6 +8,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **T1.5b** — Frontend store integration into the orchestrator. Writes now
+  flow through `this.store`; the in-memory `this.annotations` array is
+  kept as a backwards-compatibility mirror updated from store events.
+  * `createConnectionBetween` (linked annotations via drag) calls
+    `this.store.create(container, body, { connection })`. The connection
+    object gets stamped with the temp IRI immediately and with the real
+    IRI when `annotation:updated` fires after the POST settles.
+  * The `annotation-created` / `image-annotation-created` handlers for
+    standalone comment + tag annotations call
+    `this.store.create(container, body, { element })`; the DOM element
+    receives `data-annotation-iri` on the optimistic event and the real
+    IRI takes over on settle.
+  * New handlers on `annotation-deleted` /
+    `image-annotation-deleted` route deletion through
+    `this.store.remove(iri)` using the `data-annotation-iri` attribute on
+    the element.
+  * `deleteConnection` deletes via `this.store.remove(connection.annotationIri)`
+    after the visual elements are removed.
+  * `showConnectionInfo` now reads from `this.store.get(iri)` first,
+    falling back to the legacy array index for any pre-store rows.
+  * `exportAnnotations` and `getAnnotations` source from `this.store.all()`.
+- **T1.5b** — `<mma-toast-stack>` web component: position-fixed bottom-
+  right, flat aesthetic (no radius, no shadow), three kinds (`network`,
+  `server` → red; `validation` → amber). 4000ms auto-dismiss, max 3
+  visible (FIFO eviction), 150ms fade in/out, dismiss button. Lives at
+  the orchestrator level; the store's `store:error` triggers a `push`
+  in parallel with a `console.warn('[MMA Store]', error)` for debugging.
+- **T1.5b** — Container resolution helper. Order of precedence:
+  `?container=…` URL param (must match `^[a-z0-9][a-z0-9-]{0,62}$`, else
+  ignored with `console.warn` + fall back) → `localStorage['mma:lastContainer']`
+  → hard-coded `demo-bologna`. The URL value is persisted to
+  `localStorage` so the next reload remembers it. No UI for choosing
+  container in Phase 1; URL is the interface.
+- **T1.5b** — Store adapter re-emits kebab-case `CustomEvent`s on the
+  orchestrator (`annotation-created`, `annotation-updated`,
+  `annotation-removed`, `annotations-updated`) so any pre-T1.5b consumer
+  of those legacy events keeps working. Internal handlers that listen
+  to child-panel `annotation-created` events disambiguate by checking
+  `e.detail.element` (children carry the DOM element, the adapter
+  carries the JSON-LD annotation directly).
+- **T1.5b** — `meta` parameter added to `AnnotationStore.create / update
+  / remove`. Opaque object echoed back on every event for that call so
+  callers can correlate optimistic events to their own bookkeeping
+  (DOM refs, connection records). Tests assert that `meta` propagates
+  through both the optimistic and the settled events.
+- **T1.5b** — `store:error` event details now include
+  `{ op, error, kind, message, ... }`. `kind` is `network` (fetch threw
+  / no HTTP status), `validation` (HTTP 4xx), or `server` (HTTP 5xx and
+  anything else); `message` is a short human-readable string. Tests
+  cover the three branches.
 - **T1.5** — `src/store/annotation-store.js`: standalone HTTP client + local
   cache + optimistic-update event surface for the WAP gateway. NOT wired
   into the orchestrator yet (T1.5b will integrate). Public API:
