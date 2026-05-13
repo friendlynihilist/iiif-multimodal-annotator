@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **T1.4a** — Full WAP CRUD over named-graph-per-annotation, end-to-end
+  HTTP round-trip green:
+  * `POST /w3c/{container}/` — mints `<BASE_NS>annotations/{container}/
+    {ulid_lowercase}`, parses JSON-LD via pyld, persists into Fuseki
+    via SPARQL Update INSERT DATA in a named graph keyed by the
+    annotation IRI. Returns 201 with `Location:` header and the saved
+    annotation as JSON-LD (Content-Type `application/ld+json`). HTTP
+    IRIs (not `urn:uuid:`) for FAIR/LOD compliance; the `BASE_NS` env
+    keeps the canonical URI configurable for future institutional
+    instances.
+  * `GET /w3c/{container}/` — lists every annotation IRI in the
+    container by SELECT DISTINCT ?g + FILTER(STRSTARTS(...)) against
+    Fuseki, wrapped in an `oa:AnnotationPage`.
+  * `GET /w3c/{container}/{annotation_id}` — CONSTRUCT FROM GRAPH,
+    parsed by rdflib and re-serialised through pyld's compactor +
+    framer so the response is JSON-LD compacted with the profile
+    context, framed on the annotation IRI.
+  * `PUT /w3c/{container}/{annotation_id}` — preserves all historical
+    HICO InterpretationActs and stamps the previous-latest with
+    `dcterms:isReplacedBy <new_act>`; mints a fresh Act under
+    `<annotation_iri>/interpretation/{ulid_lowercase}`; carries forward
+    the original `dcterms:created` and refreshes `dcterms:modified`.
+    Atomic `DROP SILENT GRAPH …; INSERT DATA …` so reads never see a
+    half-replaced graph. 404 if no such annotation.
+  * `DELETE /w3c/{container}/{annotation_id}` — hard `DROP SILENT
+    GRAPH` (no soft delete in Phase 1; Phase 3 will revisit).
+  * Container names validated by `^[a-z0-9][a-z0-9-]{0,62}$` — mismatch
+    → 400 with the regex in the detail. Containers and profiles are
+    orthogonal in Phase 1; the same container may hold annotations
+    of mixed profiles for the cross-profile demo.
+- **T1.4a** — Provenance generation rules (per CLAUDE-decisions of
+  2026-05-13):
+  * If the client's JSON-LD already declares a `prov:wasGeneratedBy`
+    pointing at a `hico:InterpretationAct`, accept it as-is (and add
+    `prov:Activity` as a second type for ontological consistency).
+  * Otherwise generate a default Act with:
+    `a hico:InterpretationAct, prov:Activity ;`
+    `hico:hasInterpretationType "annotation"@en ;`
+    `dcterms:creator <DEFAULT_CREATOR_IRI> ;`
+    `prov:startedAtTime "now"^^xsd:dateTime ;`
+    `rdfs:comment "Auto-generated default; replace with explicit `
+    `interpretation in Phase 3 UI."@en .`
+  * On every PUT, mint a fresh Act regardless of whether the body
+    carries one; if the previous-latest Act exists, stamp it with
+    `dcterms:isReplacedBy <new>` so the named graph accumulates a
+    versioned chain of interpretations.
+- **T1.4a** — New backend service modules:
+  * `app/services/iri.py`: container regex, lowercase ULID via
+    `python-ulid`, helpers `annotation_iri()`,
+    `mint_annotation_iri()`, `mint_interpretation_act_iri()`.
+  * `app/services/jsonld.py`: `jsonld_doc_to_graph()` (expand + parse
+    to rdflib), `graph_to_jsonld()` (N-Triples → pyld.from_rdf →
+    compact/frame with the profile context). Inlines our own served
+    `@context` URLs at parse time so pyld doesn't need a document
+    loader for the common case.
+  * `app/services/provenance.py`: `find_input_interpretation_act()`,
+    `add_default_act()`, `ensure_activity_type()`, `latest_act()`,
+    `stamp_replacement()`, `filter_act_triples()`. The HICO/PROV
+    namespaces are bound here.
+  * `app/services/fuseki.py` extended with `sparql_update()`,
+    `insert_graph()`, `replace_graph()` (atomic DROP + INSERT in one
+    update), `drop_graph()`, `construct_graph()`, `graph_exists()`,
+    `list_graphs_with_prefix()`.
+- **T1.4a** — `python-ulid==3.1.0` added to `backend/requirements.txt`.
+- **T1.4a** — `@context` extensions:
+  `isReplacedBy → dcterms:isReplacedBy (@id)`, `comment → rdfs:comment`.
+- **T1.4a** — `start`/`end` selector types in the `@context` relaxed
+  from `xsd:nonNegativeInteger` to `xsd:integer` so the round-trip
+  compaction produces `"start": "245"` instead of an unaliased
+  `"oa:start": {"type": "xsd:integer", "@value": "245"}`. RDF semantics
+  unchanged (any non-negative integer is also an integer).
+
 ### Fixed
 - **HICO namespace correction** (supersedes the change in `1b5236c`
   T1.2 and the earlier briefing). The canonical RDF namespace for HICO 2.0

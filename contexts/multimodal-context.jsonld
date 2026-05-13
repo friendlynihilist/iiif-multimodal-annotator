@@ -80,18 +80,20 @@
     "SvgSelector":           "oa:SvgSelector",
     "RangeSelector":         "oa:RangeSelector",
 
-    "start":  { "@id": "oa:start", "@type": "xsd:nonNegativeInteger" },
-    "end":    { "@id": "oa:end",   "@type": "xsd:nonNegativeInteger" },
+    "start":  { "@id": "oa:start", "@type": "xsd:integer" },
+    "end":    { "@id": "oa:end",   "@type": "xsd:integer" },
     "exact":  "oa:exact",
     "prefix": "oa:prefix",
     "suffix": "oa:suffix",
 
-    "created":  { "@id": "dcterms:created",  "@type": "xsd:dateTime" },
-    "modified": { "@id": "dcterms:modified", "@type": "xsd:dateTime" },
-    "creator":  { "@id": "dcterms:creator",  "@type": "@id" },
+    "created":      { "@id": "dcterms:created",      "@type": "xsd:dateTime" },
+    "modified":     { "@id": "dcterms:modified",     "@type": "xsd:dateTime" },
+    "creator":      { "@id": "dcterms:creator",      "@type": "@id" },
+    "isReplacedBy": { "@id": "dcterms:isReplacedBy", "@type": "@id" },
 
     "items":    { "@id": "as:items", "@container": "@list" },
     "label":    "rdfs:label",
+    "comment":  "rdfs:comment",
 
     "profile":             { "@id": "mma:profile", "@type": "@id" },
 
