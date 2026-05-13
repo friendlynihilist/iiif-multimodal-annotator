@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────────────
+# Multimodal Annotator — local orchestration
+#
+# Phase 1 stub. Services will be fleshed out in T1.3.
+# Run:   docker compose up
+# Stop:  docker compose down  (data persists in the `fuseki-data` volume)
+# Wipe:  docker compose down -v
+# ─────────────────────────────────────────────────────────────────────
+
+services:
+  fuseki:
+    image: stain/jena-fuseki:5.0.0
+    container_name: mma-fuseki
+    environment:
+      ADMIN_PASSWORD: admin
+      JVM_ARGS: -Xmx2g
+      FUSEKI_DATASET_1: mma
+    ports:
+      - "3030:3030"
+    volumes:
+      - fuseki-data:/fuseki
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mma-backend
+    env_file:
+      - .env
+    environment:
+      FUSEKI_URL: http://fuseki:3030/mma
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./profiles:/app/profiles:ro
+      - ./contexts:/app/contexts:ro
+    depends_on:
+      - fuseki
+
+volumes:
+  fuseki-data:
