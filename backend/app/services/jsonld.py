@@ -82,7 +82,16 @@ def graph_to_jsonld(g: Graph, frame_iri: str | None = None) -> dict[str, Any]:
     # Graph isn't one. N-Triples is unambiguous and pyld.from_rdf accepts
     # it via the application/n-quads format (which is a superset).
     nt = g.serialize(format="nt")
-    expanded = jsonld.from_rdf(nt, options={"format": "application/n-quads"})
+
+    # `useNativeTypes: True` makes xsd:integer / xsd:double / xsd:boolean
+    # literals come out as JSON numbers and booleans instead of strings —
+    # critical for the frontend (T1.5) which will do arithmetic on
+    # selector.start / selector.end and otherwise produce string-concat
+    # bugs.
+    expanded = jsonld.from_rdf(nt, options={
+        "format": "application/n-quads",
+        "useNativeTypes": True,
+    })
 
     ctx_doc = load_default_context()
     if frame_iri is None:
@@ -92,4 +101,4 @@ def graph_to_jsonld(g: Graph, frame_iri: str | None = None) -> dict[str, Any]:
         "@context": ctx_doc["@context"],
         "@id": frame_iri,
     }
-    return jsonld.frame(expanded, frame)
+    return jsonld.frame(expanded, frame, options={"useNativeTypes": True})

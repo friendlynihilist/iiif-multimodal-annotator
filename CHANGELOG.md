@@ -8,7 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **T1.4a** — Full WAP CRUD over named-graph-per-annotation, end-to-end
+- **T1.5** — `src/store/annotation-store.js`: standalone HTTP client + local
+  cache + optimistic-update event surface for the WAP gateway. NOT wired
+  into the orchestrator yet (T1.5b will integrate). Public API:
+  * `load(container)` GET → fills cache, returns `Annotation[]`
+  * `create(container, body)` POST → optimistic `temp:` IRI in cache,
+    server-assigned IRI swaps in via `annotation:updated`
+  * `update(iri, body)` PUT → optimistic apply, rollback on error
+  * `remove(iri)` DELETE → optimistic remove, reinstate on error
+  * `get(iri)`, `all()` — cache reads
+  * `on(event, handler) / off(event, handler)` — EventTarget surface
+    with events `annotation:created | annotation:updated |
+    annotation:removed | store:loaded | store:error`
+- **T1.5** — `tests/store.test.js`: 9 tests covering happy path + error
+  rollback for every public method, plus optimistic-event order checks.
+  Uses Node's built-in `node:test` + `node:assert/strict` (zero new
+  devDependencies). `npm test` is now wired to `node --test tests/store.test.js`.
+- **T1.4b** — `backend/scripts/test_wap_native_types.py`: integration check
+  that POST → triple store → GET / LIST preserves `xsd:integer` literals
+  as JSON numbers (not strings). Critical guard for the frontend store
+  which will do arithmetic on `selector.start` / `selector.end`.
+
+### Changed
+- **T1.4b** — `backend/app/services/jsonld.py`: pyld's `from_rdf` is now
+  invoked with `useNativeTypes: True`, and `jsonld.frame` likewise. This
+  promotes `xsd:integer` / `xsd:double` / `xsd:boolean` literals to JSON
+  number / boolean in the response, instead of typed-string objects.
+- **T1.4b** — `contexts/multimodal-context.jsonld`: term defs for `start`,
+  `end`, `canvasIndex`, `pageNr` no longer carry `"@type": "xsd:integer"`.
+  With `useNativeTypes: True`, an explicit term type prevents pyld's
+  compactor from aliasing the term (you get `"oa:start": 245` instead of
+  `"start": 245`). The xsd:integer datatype is inferred automatically
+  from the JSON value at expand time, so the underlying RDF is unchanged.
+- **T1.4b** — `backend/app/routes/wap.py` `GET /w3c/{container}/`: now
+  embeds full annotations under `items[]` (each with its own `@context`
+  stripped because the outer page-level `@context` applies). Lets the
+  frontend store hydrate with one request instead of N+1.
+
+
   HTTP round-trip green:
   * `POST /w3c/{container}/` — mints `<BASE_NS>annotations/{container}/
     {ulid_lowercase}`, parses JSON-LD via pyld, persists into Fuseki

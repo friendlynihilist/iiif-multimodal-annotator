@@ -161,14 +161,33 @@ async def create_annotation(container: str, request: Request) -> Response:
 
 @router.get("/{container}/")
 async def list_annotations(container: str) -> dict[str, Any]:
+    """Embed every annotation in the container in the response so the
+    frontend store can hydrate with a single request. Each item carries
+    no `@context` of its own — the outer one applies. Phase 1 acceptance
+    is fine with `O(N) CONSTRUCT` for ≤ a few thousand annotations per
+    container; T3+ may switch to a single bulk CONSTRUCT if a profiling
+    pass shows the per-item overhead matters."""
     _validate_container(container)
     prefix = annotation_iri(container, "")
-    graphs = await get_client().list_graphs_with_prefix(prefix)
+    fuseki = get_client()
+    graphs = await fuseki.list_graphs_with_prefix(prefix)
+
+    items = []
+    for iri in graphs:
+        nt = await fuseki.construct_graph(iri)
+        if not nt.strip():
+            continue
+        g = Graph()
+        g.parse(data=nt, format="nt")
+        doc = graph_to_jsonld(g, frame_iri=iri)
+        doc.pop("@context", None)
+        items.append(doc)
+
     return {
         "@context": load_default_context()["@context"],
         "id": prefix,
         "type": "AnnotationPage",
-        "items": graphs,
+        "items": items,
     }
 
 
