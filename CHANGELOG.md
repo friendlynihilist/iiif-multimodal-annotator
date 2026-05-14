@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Known limitations / Phase 3 work
+
+#### Hard delete (Phase 1 limitation)
+Currently, deleting an annotation performs a hard `DROP GRAPH` on the
+triple store, removing the annotation AND its associated
+InterpretationAct chain. This contradicts HICO's promise that
+interpretations are historical facts. Phase 3 will introduce soft
+delete: annotations marked as retired but graph triples preserved,
+with `mma:status mma:retired` and `dcterms:dateAccepted` as deletion
+timestamp. The InterpretationAct chain will remain queryable for
+provenance studies.
+
+#### Atomic linking-annotation deletion (Phase 1 limitation)
+Currently, deleting any component of a linking annotation (either
+endpoint or the line) removes the entire annotation. Phase 2 will
+introduce a "transform" operation: deleting an endpoint preserves
+the other endpoint as a standalone annotation (commenting or
+tagging motivation), with `prov:wasDerivedFrom` linking the new
+standalone to the original linking annotation. This requires a new
+backend endpoint (atomic DELETE+CREATE in transaction) and a
+3-option confirmation modal in the UI.
+
+### Fixed
+- **T1.5b P0 bug** — Delete operations now actually hit the backend.
+  Two compounding causes:
+  * The IRI was stamped only on a subset of visual elements (`element`
+    for standalone, `connection` for linked) — for a linking
+    annotation, the text mark and the image rect had no
+    `data-annotation-iri` attribute, so the panel-side delete handler
+    couldn't recover an IRI to feed to `store.remove(...)`.
+  * SVG elements (freehand image selectors) lack `dataset` in some
+    browsers; the read path was `e.detail.element.dataset.annotationIri`
+    which silently returned `undefined`.
+
+  Fix: the create path for linking annotations now passes
+  `{ connection, textElement, imageRect }` as `meta`, and the
+  orchestrator's adapter stamps the IRI as a `data-annotation-iri`
+  attribute (via `setAttribute`, which works on both HTMLElement and
+  SVGElement) on all three. The delete listeners read it via
+  `getAttribute(...)`. A centralized `annotation:removed` handler
+  `_purgeAnnotationVisuals(iri)` then walks every panel's shadow root,
+  the `this.connections` array, and the `unlinkedTextElements` /
+  `unlinkedImageRects` slots, removing every visual or bookkeeping
+  reference tied to that IRI. The behaviour implements the atomic
+  linking-deletion design above.
+
+  Verification (live, against `docker compose up` stack):
+  * standalone text delete → DELETE → 204, `COUNT(?g)` drops by 1
+  * standalone image delete → DELETE → 204, `COUNT(?g)` drops by 1
+  * linking delete via text-mark popup → ONE DELETE → 204, both
+    endpoints AND the connection line vanish
+  * linking delete via image rect → identical behaviour
+  * linking delete via connection-menu → identical behaviour
+- **T1.5b safety log** — When a panel emits
+  `annotation-deleted` / `image-annotation-deleted` without a
+  `data-annotation-iri` on the element (impossible after this fix but
+  worth defending against future regressions), the orchestrator now
+  emits `console.warn('[MMA] annotation-deleted from panel had no
+  data-annotation-iri on element', detail)` so the cause is visible at
+  a glance.
+
 ### Added
 - **T1.5b** — Frontend store integration into the orchestrator. Writes now
   flow through `this.store`; the in-memory `this.annotations` array is

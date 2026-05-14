@@ -97,12 +97,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
     // replace this mapping with native colon-style events.
     this.store.on('annotation:created', (e) => {
       const { annotation, optimistic, tempIri, meta } = e.detail;
-      if (optimistic) {
-        // Stamp the DOM element with the temp IRI so deletion paths can
-        // find it later. Real IRI gets stamped on 'annotation:updated'.
-        if (meta?.element) meta.element.dataset.annotationIri = tempIri;
-        if (meta?.connection) meta.connection.annotationIri = tempIri;
-      }
+      if (optimistic) this._stampIriOnMeta(meta, tempIri);
       this.dispatchEvent(new CustomEvent('annotation-created', {
         detail: annotation, bubbles: true, composed: true,
       }));
@@ -110,10 +105,8 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     this.store.on('annotation:updated', (e) => {
       const { annotation, tempIri, meta } = e.detail;
-      // Swap temp IRI → real IRI on the visual references.
       if (tempIri && annotation?.id && annotation.id !== tempIri) {
-        if (meta?.element) meta.element.dataset.annotationIri = annotation.id;
-        if (meta?.connection) meta.connection.annotationIri = annotation.id;
+        this._stampIriOnMeta(meta, annotation.id);
         // Keep `this.annotations` mirror coherent.
         const tmpIdx = this.annotations.findIndex((a) => a?.id === tempIri);
         if (tmpIdx >= 0) this.annotations[tmpIdx] = annotation;
@@ -132,6 +125,12 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     this.store.on('annotation:removed', (e) => {
       const { iri } = e.detail;
+      // Atomic linking design (Phase 1): a single mma annotation IRI lives
+      // on multiple visual surfaces (mark, rect, connection line). When
+      // the store removes the annotation, every visual tagged with that
+      // IRI is purged here in one place, regardless of which surface
+      // initiated the delete.
+      this._purgeAnnotationVisuals(iri);
       const idx = this.annotations.findIndex((a) => a?.id === iri);
       if (idx >= 0) this.annotations.splice(idx, 1);
       this.dispatchEvent(new CustomEvent('annotation-removed', {
@@ -147,6 +146,93 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     // Initial load. Errors are non-fatal and surface via the toast stack.
     this.store.load(this.container).catch(() => { /* surfaced by store:error */ });
+  }
+
+  /** Stamp the given IRI onto every visual surface in `meta`. SVG and
+   *  HTML elements both use the same `data-annotation-iri` attribute so
+   *  `_purgeAnnotationVisuals` can query for them uniformly. */
+  _stampIriOnMeta(meta, iri) {
+    if (!meta || !iri) return;
+    const setIri = (el) => {
+      if (!el) return;
+      // HTMLElement supports `dataset`; SVGElement doesn't until
+      // SVG2 / fairly recent browsers — `setAttribute` is universal.
+      el.setAttribute('data-annotation-iri', iri);
+    };
+    setIri(meta.element);
+    setIri(meta.textElement);
+    setIri(meta.imageRect);
+    if (meta.connection) meta.connection.annotationIri = iri;
+  }
+
+  /** Atomic cleanup: every DOM element tagged with `iri` (in any panel's
+   *  shadow root), every entry in `this.connections` carrying that IRI,
+   *  and every panel-local bookkeeping slot referencing those DOM nodes
+   *  is dropped. Implements the Phase 1 atomic-linking-deletion rule:
+   *  deleting any visual of a linking annotation tears down the whole
+   *  annotation. Idempotent: callable from any delete surface (text-
+   *  panel popup, image-panel sidebar, connection menu) — whoever fires
+   *  `store.remove(iri)` triggers `annotation:removed`, which lands
+   *  here exactly once per IRI. */
+  _purgeAnnotationVisuals(iri) {
+    if (!iri) return;
+    let escaped;
+    try { escaped = CSS.escape(iri); } catch (_) { escaped = iri; }
+    const selector = `[data-annotation-iri="${escaped}"]`;
+
+    const textPanels = this.shadowRoot.querySelectorAll('iiif-text-panel');
+    for (const tp of textPanels) {
+      if (!tp.shadowRoot) continue;
+      const matches = Array.from(tp.shadowRoot.querySelectorAll(selector));
+      for (const el of matches) {
+        // Text marks should unwrap (replace with text) so the prose flows
+        // naturally; everything else gets removed outright.
+        if (el.tagName === 'MARK' && el.parentNode) {
+          const tn = document.createTextNode(el.textContent);
+          el.parentNode.replaceChild(tn, el);
+          el.parentNode.normalize?.();
+        } else if (el.parentNode) {
+          el.remove();
+        }
+        if (Array.isArray(tp.confirmedElements)) {
+          const i = tp.confirmedElements.findIndex((c) => c.element === el);
+          if (i >= 0) tp.confirmedElements.splice(i, 1);
+        }
+      }
+    }
+
+    const imagePanels = this.shadowRoot.querySelectorAll('iiif-image-panel');
+    for (const ip of imagePanels) {
+      if (!ip.shadowRoot) continue;
+      const matches = Array.from(ip.shadowRoot.querySelectorAll(selector));
+      for (const el of matches) {
+        if (el.parentNode) el.remove();
+        if (Array.isArray(ip.confirmedRects)) {
+          const i = ip.confirmedRects.findIndex((c) => c.element === el);
+          if (i >= 0) ip.confirmedRects.splice(i, 1);
+        }
+      }
+    }
+
+    // Connections (path + label live in the orchestrator's overlay SVG).
+    for (let i = this.connections.length - 1; i >= 0; i--) {
+      const c = this.connections[i];
+      if (c.annotationIri === iri) {
+        if (c.path) c.path.remove();
+        if (c.label) c.label.remove();
+        this.connections.splice(i, 1);
+      }
+    }
+
+    // Unlinked-elements tracking (held by the orchestrator while the
+    // user is choosing how to use a selection). Drop any reference to
+    // an element with this IRI.
+    this.unlinkedTextElements = this.unlinkedTextElements.filter(
+      (item) => item.element?.getAttribute?.('data-annotation-iri') !== iri
+    );
+    this.unlinkedImageRects = this.unlinkedImageRects.filter(
+      (item) => item.element?.getAttribute?.('data-annotation-iri') !== iri
+    );
   }
 
   render() {
@@ -1384,20 +1470,27 @@ export class IIIFInterimAnnotator extends HTMLElement {
       this.updateStatus(`Image ${annotationType} annotation created`);
     });
 
-    // Standalone annotation DELETE — children emit annotation-deleted /
-    // image-annotation-deleted; route them through the store.
-    this.addEventListener('annotation-deleted', (e) => {
-      const iri = e.detail?.element?.dataset?.annotationIri;
-      if (iri && this.store) {
-        this.store.remove(iri).catch(() => {});
+    // Panel-side annotation DELETE — children emit annotation-deleted /
+    // image-annotation-deleted; route through the store so the backend
+    // graph is dropped. The centralized 'annotation:removed' listener
+    // (in _initStore) then purges every visual tagged with that IRI in
+    // any panel — implementing the atomic linking-annotation rule
+    // (deleting one endpoint tears down the whole annotation).
+    //
+    // We read the IRI via getAttribute('data-annotation-iri') instead of
+    // `dataset.annotationIri` because SVG elements (used by the freehand
+    // image selector) lack `dataset` in some browsers.
+    const routeDelete = (e) => {
+      const iri = e.detail?.element?.getAttribute?.('data-annotation-iri');
+      if (!iri) {
+        console.warn('[MMA] annotation-deleted from panel had no data-annotation-iri on element', e.detail);
+        return;
       }
-    });
-    this.addEventListener('image-annotation-deleted', (e) => {
-      const iri = e.detail?.element?.dataset?.annotationIri;
-      if (iri && this.store) {
-        this.store.remove(iri).catch(() => {});
-      }
-    });
+      if (!this.store) return;
+      this.store.remove(iri).catch(() => { /* toast */ });
+    };
+    this.addEventListener('annotation-deleted', routeDelete);
+    this.addEventListener('image-annotation-deleted', routeDelete);
 
     // Listen for show comment sidebar requests
     this.addEventListener('show-comment-sidebar', (e) => {
@@ -2283,19 +2376,24 @@ export class IIIFInterimAnnotator extends HTMLElement {
     }
 
     // Push to the backend via the store. The visual rect/line are already
-    // drawn at this point; the store fires 'annotation:created' with the
-    // optimistic temp IRI immediately (the orchestrator adapter stamps it
-    // onto `connection.annotationIri`), then 'annotation:updated' with
-    // the real IRI once the POST settles. On failure the toast surfaces it.
+    // drawn at this point. The adapter (see _initStore) stamps the temp
+    // IRI immediately onto the connection AND onto both endpoints' DOM
+    // datasets, then upgrades to the real IRI when the POST settles.
+    // Per the Phase 1 atomic-linking design (PHASE-1 §"Known limitations"),
+    // a single mma annotation's IRI lives on three visual surfaces:
+    // text mark, image rect, and connection line — deleting any one of
+    // them tears the whole annotation down.
     const connection = this.connections[this.connections.length - 1];
-    // Strip transient/client-side fields the server will (re)mint.
     const payload = { ...annotation };
     delete payload.id;
     delete payload['@context'];
     delete payload.created;
     if (this.store) {
-      this.store.create(this.container, payload, { connection })
-        .catch(() => { /* toast */ });
+      this.store.create(this.container, payload, {
+        connection,
+        textElement,
+        imageRect,
+      }).catch(() => { /* toast */ });
     }
 
     // DON'T remove from unlinked lists - keep them draggable for multiple connections!
@@ -2464,20 +2562,21 @@ Annotation Details:
     const connection = this.connections[connectionIndex];
     if (!connection) return;
 
-    // Remove visual elements immediately (optimistic).
-    if (connection.path) connection.path.remove();
-    if (connection.label) connection.label.remove();
-    this.connections.splice(connectionIndex, 1);
-
-    // Delegate the data deletion to the store. Errors surface as toasts;
-    // we don't undo the visual removal because Phase 1 keeps the optimistic
-    // pattern minimal — the user can recreate from scratch if the server
-    // disagrees.
     if (this.store && connection.annotationIri) {
+      // Per the Phase 1 atomic-linking rule (CHANGELOG §"Known
+      // limitations"), removing the connection line removes the whole
+      // annotation — both endpoints AND the line. The 'annotation:removed'
+      // listener in _initStore handles the centralized DOM cleanup; we
+      // just trigger the delete here.
       this.store.remove(connection.annotationIri).catch(() => { /* toast */ });
-    } else if (connection.annotationIndex !== undefined) {
-      // Pre-store mirror cleanup for any legacy entry.
-      this.annotations.splice(connection.annotationIndex, 1);
+    } else {
+      // Pre-store / legacy fallback: clean up locally only.
+      if (connection.path) connection.path.remove();
+      if (connection.label) connection.label.remove();
+      this.connections.splice(connectionIndex, 1);
+      if (connection.annotationIndex !== undefined) {
+        this.annotations.splice(connection.annotationIndex, 1);
+      }
     }
 
     this.hideConnectionMenu();
