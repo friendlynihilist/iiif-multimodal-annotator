@@ -104,7 +104,7 @@ export class AnnotationStore extends EventTarget {
     }
     // DEBUG (T1.5b P0 diag) — remove once delete is confirmed working.
     if (typeof console !== "undefined" && console.debug) {
-      console.debug(`[MMA Store] ${method} ${url}`);
+      console.log(`[MMA Store] ${method} ${url}`);
     }
     const resp = await this._fetch(url, init);
     if (!resp.ok) {
@@ -261,7 +261,7 @@ export class AnnotationStore extends EventTarget {
   async remove(iri, meta) {
     // DEBUG (T1.5b P0 diag) — surface the IRI the orchestrator handed us.
     if (typeof console !== "undefined" && console.debug) {
-      console.debug(`[MMA Store] remove() called with iri = ${JSON.stringify(iri)}`);
+      console.log(`[MMA Store] remove() called with iri = ${JSON.stringify(iri)}`);
     }
     if (!iri || typeof iri !== "string") {
       const error = new Error(`remove() requires a string IRI, got ${typeof iri}`);

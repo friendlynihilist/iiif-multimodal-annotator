@@ -85,12 +85,37 @@ export class IIIFInterimAnnotator extends HTMLElement {
   }
 
   _initStore() {
+    console.log('[MMA] _initStore() starting');
     this.container = this._resolveContainer();
     const backendUrl = this.getAttribute('backend-url') || DEFAULT_BACKEND_URL;
     this.store = new AnnotationStore({ baseUrl: backendUrl });
     this._toastStack = this.shadowRoot.getElementById('toast-stack');
 
-    console.log(`[MMA] container="${this.container}" backend=${backendUrl}`);
+    console.log(`[MMA] container="${this.container}" backend=${backendUrl} store=`, this.store);
+
+    // Diagnostic helper accessible from DevTools:
+    //   document.querySelector('multimodal-annotator').__diag()
+    this.__diag = () => ({
+      container: this.container,
+      backend: backendUrl,
+      hasStore: !!this.store,
+      cacheSize: this.store?.cache?.size ?? 0,
+      annotationsMirror: this.annotations.length,
+      connections: this.connections.map(c => ({
+        modality: c.modality,
+        annotationIri: c.annotationIri,
+      })),
+      elementsWithIri: Array.from(
+        this.shadowRoot.querySelectorAll('iiif-text-panel,iiif-image-panel')
+      ).flatMap(p => p.shadowRoot
+        ? Array.from(p.shadowRoot.querySelectorAll('[data-annotation-iri]')).map(el => ({
+            panel: p.tagName.toLowerCase(),
+            tag: el.tagName,
+            iri: el.getAttribute('data-annotation-iri'),
+          }))
+        : []
+      ),
+    });
 
     // ── Adapter: store events → legacy kebab-case CustomEvents on `this`.
     // External consumers keep listening to the legacy names; Phase 3 will
@@ -125,7 +150,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     this.store.on('annotation:removed', (e) => {
       const { iri } = e.detail;
-      console.debug('[MMA] annotation:removed listener fired for', iri);
+      console.log('[MMA] annotation:removed listener fired for', iri);
       // Atomic linking design (Phase 1): a single mma annotation IRI lives
       // on multiple visual surfaces (mark, rect, connection line). When
       // the store removes the annotation, every visual tagged with that
@@ -160,7 +185,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
       // SVG2 / fairly recent browsers — `setAttribute` is universal.
       el.setAttribute('data-annotation-iri', iri);
       // DEBUG (T1.5b P0 diag)
-      console.debug(`[MMA] stamped ${kind} with data-annotation-iri=${iri}`,
+      console.log(`[MMA] stamped ${kind} with data-annotation-iri=${iri}`,
                     { tag: el.tagName, classes: el.className });
     };
     setIri(meta.element, 'meta.element');
@@ -168,7 +193,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
     setIri(meta.imageRect, 'meta.imageRect');
     if (meta.connection) {
       meta.connection.annotationIri = iri;
-      console.debug(`[MMA] stamped connection.annotationIri=${iri}`);
+      console.log(`[MMA] stamped connection.annotationIri=${iri}`);
     }
   }
 
@@ -1449,6 +1474,13 @@ export class IIIFInterimAnnotator extends HTMLElement {
     // by the presence of `e.detail.element`.
     this.addEventListener('annotation-created', (e) => {
       if (!e.detail || !e.detail.element) return; // not from a child panel
+      console.log('[MMA] annotation-created from child panel', {
+        annotationType: e.detail.annotationType,
+        elementTag: e.detail.element?.tagName,
+        elementClass: e.detail.element?.className,
+        hasStore: !!this.store,
+        container: this.container,
+      });
       const { element, selection, annotationType, body } = e.detail;
 
       const annotation = this.createStandaloneAnnotation(selection, annotationType, body);
@@ -1490,7 +1522,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
     const routeDelete = (e) => {
       // DEBUG (T1.5b P0 diag)
       const el = e.detail?.element;
-      console.debug('[MMA] routeDelete called', {
+      console.log('[MMA] routeDelete called', {
         type: e.type,
         elementTag: el?.tagName,
         elementClasses: el?.className,
@@ -2584,7 +2616,7 @@ Annotation Details:
     const connection = this.connections[connectionIndex];
     if (!connection) return;
     // DEBUG (T1.5b P0 diag)
-    console.debug('[MMA] deleteConnection', {
+    console.log('[MMA] deleteConnection', {
       connectionIndex,
       annotationIri: connection.annotationIri,
       hasStore: !!this.store,
