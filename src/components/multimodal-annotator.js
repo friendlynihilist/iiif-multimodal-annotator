@@ -125,6 +125,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     this.store.on('annotation:removed', (e) => {
       const { iri } = e.detail;
+      console.debug('[MMA] annotation:removed listener fired for', iri);
       // Atomic linking design (Phase 1): a single mma annotation IRI lives
       // on multiple visual surfaces (mark, rect, connection line). When
       // the store removes the annotation, every visual tagged with that
@@ -153,16 +154,22 @@ export class IIIFInterimAnnotator extends HTMLElement {
    *  `_purgeAnnotationVisuals` can query for them uniformly. */
   _stampIriOnMeta(meta, iri) {
     if (!meta || !iri) return;
-    const setIri = (el) => {
+    const setIri = (el, kind) => {
       if (!el) return;
       // HTMLElement supports `dataset`; SVGElement doesn't until
       // SVG2 / fairly recent browsers — `setAttribute` is universal.
       el.setAttribute('data-annotation-iri', iri);
+      // DEBUG (T1.5b P0 diag)
+      console.debug(`[MMA] stamped ${kind} with data-annotation-iri=${iri}`,
+                    { tag: el.tagName, classes: el.className });
     };
-    setIri(meta.element);
-    setIri(meta.textElement);
-    setIri(meta.imageRect);
-    if (meta.connection) meta.connection.annotationIri = iri;
+    setIri(meta.element, 'meta.element');
+    setIri(meta.textElement, 'meta.textElement');
+    setIri(meta.imageRect, 'meta.imageRect');
+    if (meta.connection) {
+      meta.connection.annotationIri = iri;
+      console.debug(`[MMA] stamped connection.annotationIri=${iri}`);
+    }
   }
 
   /** Atomic cleanup: every DOM element tagged with `iri` (in any panel's
@@ -1481,13 +1488,28 @@ export class IIIFInterimAnnotator extends HTMLElement {
     // `dataset.annotationIri` because SVG elements (used by the freehand
     // image selector) lack `dataset` in some browsers.
     const routeDelete = (e) => {
-      const iri = e.detail?.element?.getAttribute?.('data-annotation-iri');
+      // DEBUG (T1.5b P0 diag)
+      const el = e.detail?.element;
+      console.debug('[MMA] routeDelete called', {
+        type: e.type,
+        elementTag: el?.tagName,
+        elementClasses: el?.className,
+        rawAttr: el?.getAttribute?.('data-annotation-iri'),
+        datasetIri: el?.dataset?.annotationIri,
+        outerHtmlPreview: el?.outerHTML?.slice?.(0, 120),
+      });
+      const iri = el?.getAttribute?.('data-annotation-iri');
       if (!iri) {
         console.warn('[MMA] annotation-deleted from panel had no data-annotation-iri on element', e.detail);
         return;
       }
-      if (!this.store) return;
-      this.store.remove(iri).catch(() => { /* toast */ });
+      if (!this.store) {
+        console.warn('[MMA] no store available; cannot DELETE', iri);
+        return;
+      }
+      this.store.remove(iri).catch((err) => {
+        console.warn('[MMA] store.remove rejected', err);
+      });
     };
     this.addEventListener('annotation-deleted', routeDelete);
     this.addEventListener('image-annotation-deleted', routeDelete);
@@ -2561,6 +2583,12 @@ Annotation Details:
   deleteConnection(connectionIndex) {
     const connection = this.connections[connectionIndex];
     if (!connection) return;
+    // DEBUG (T1.5b P0 diag)
+    console.debug('[MMA] deleteConnection', {
+      connectionIndex,
+      annotationIri: connection.annotationIri,
+      hasStore: !!this.store,
+    });
 
     if (this.store && connection.annotationIri) {
       // Per the Phase 1 atomic-linking rule (CHANGELOG §"Known

@@ -102,6 +102,10 @@ export class AnnotationStore extends EventTarget {
       init.headers["Content-Type"] = "application/ld+json";
       init.body = typeof body === "string" ? body : JSON.stringify(body);
     }
+    // DEBUG (T1.5b P0 diag) — remove once delete is confirmed working.
+    if (typeof console !== "undefined" && console.debug) {
+      console.debug(`[MMA Store] ${method} ${url}`);
+    }
     const resp = await this._fetch(url, init);
     if (!resp.ok) {
       const text = await resp.text().catch(() => "");
@@ -255,8 +259,32 @@ export class AnnotationStore extends EventTarget {
 
   /** Delete an annotation. Optimistic: removes locally, reinstates on error. */
   async remove(iri, meta) {
+    // DEBUG (T1.5b P0 diag) — surface the IRI the orchestrator handed us.
+    if (typeof console !== "undefined" && console.debug) {
+      console.debug(`[MMA Store] remove() called with iri = ${JSON.stringify(iri)}`);
+    }
+    if (!iri || typeof iri !== "string") {
+      const error = new Error(`remove() requires a string IRI, got ${typeof iri}`);
+      this._emit("store:error", {
+        op: "remove", error, iri, meta,
+        kind: "validation",
+        message: `remove failed: missing IRI on the visual element`,
+      });
+      throw error;
+    }
     const previous = this.cache.get(iri);
-    const { container, id } = iriToContainerAndId(iri);
+    let parsed;
+    try {
+      parsed = iriToContainerAndId(iri);
+    } catch (error) {
+      this._emit("store:error", {
+        op: "remove", error, iri, meta,
+        kind: "validation",
+        message: `remove failed: unparseable IRI ${iri}`,
+      });
+      throw error;
+    }
+    const { container, id } = parsed;
 
     this.cache.delete(iri);
     this._emit("annotation:removed", { iri, meta });
