@@ -324,6 +324,81 @@ describe("meta propagation", () => {
   });
 });
 
+describe("AnnotationStore.remove (IRI normalization)", () => {
+  test("accepts the expanded (https://) form and DELETEs the right URL", async () => {
+    let deletedUrl = null;
+    const fetchImpl = async (url, init) => {
+      if (init?.method === "DELETE") {
+        deletedUrl = String(url);
+        return buildResponse({ status: 204 });
+      }
+      return buildResponse({ status: 404 });
+    };
+    const store = new AnnotationStore({ baseUrl: BASE, fetchImpl });
+    const fullIri =
+      "https://w3id.org/multimodal-annotator/ns/annotations/demo/01h00000000000000000000001";
+    store.cache.set(fullIri, { id: fullIri, type: "Annotation" });
+
+    await store.remove(fullIri);
+
+    assert.equal(
+      deletedUrl,
+      `${BASE}/w3c/demo/01h00000000000000000000001`,
+    );
+    assert.equal(store.get(fullIri), undefined);
+  });
+
+  test("accepts the compact (mma:) form and DELETEs the same URL", async () => {
+    let deletedUrl = null;
+    const fetchImpl = async (url, init) => {
+      if (init?.method === "DELETE") {
+        deletedUrl = String(url);
+        return buildResponse({ status: 204 });
+      }
+      return buildResponse({ status: 404 });
+    };
+    const store = new AnnotationStore({ baseUrl: BASE, fetchImpl });
+    const compactIriValue = "mma:annotations/demo/01h00000000000000000000001";
+    store.cache.set(compactIriValue, { id: compactIriValue, type: "Annotation" });
+
+    await store.remove(compactIriValue);
+
+    assert.equal(
+      deletedUrl,
+      `${BASE}/w3c/demo/01h00000000000000000000001`,
+      "compact IRI must route to the same DELETE URL as the expanded form",
+    );
+    assert.equal(store.get(compactIriValue), undefined);
+  });
+
+  test("emits 'store:error' with kind 'validation' on an unparseable IRI", async () => {
+    const fetchImpl = async () => buildResponse({ status: 204 });
+    const store = new AnnotationStore({ baseUrl: BASE, fetchImpl });
+    const errors = [];
+    store.on("store:error", (e) => errors.push(e.detail));
+
+    await assert.rejects(
+      () => store.remove("urn:isbn:1234567890"),
+      /unrecognised IRI form/,
+    );
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].op, "remove");
+    assert.equal(errors[0].kind, "validation");
+  });
+
+  test("rejects on missing / non-string IRI with kind 'validation'", async () => {
+    const store = new AnnotationStore({ baseUrl: BASE, fetchImpl: async () => buildResponse({ status: 204 }) });
+    const errors = [];
+    store.on("store:error", (e) => errors.push(e.detail));
+
+    await assert.rejects(() => store.remove(undefined), /requires a string IRI/);
+    await assert.rejects(() => store.remove(""), /requires a string IRI/);
+    await assert.rejects(() => store.remove(123), /requires a string IRI/);
+    assert.equal(errors.length, 3);
+    for (const e of errors) assert.equal(e.kind, "validation");
+  });
+});
+
 describe("on/off return-value", () => {
   test("on() returns an unsubscriber", () => {
     const store = new AnnotationStore({ baseUrl: BASE, fetchImpl: async () => ({}) });

@@ -30,6 +30,54 @@ backend endpoint (atomic DELETE+CREATE in transaction) and a
 3-option confirmation modal in the UI.
 
 ### Fixed
+- **T1.5b P0 root cause** — Delete operations finally reach the backend.
+  Earlier fix attempts only addressed missing `data-annotation-iri`
+  stamping; the actual cause was deeper. The backend's JSON-LD response
+  carries `"id": "mma:annotations/<container>/<ulid>"` (compact CURIE
+  form, courtesy of pyld's compaction against the bundled context).
+  The orchestrator's `_stampIriOnMeta` faithfully wrote that value to
+  the DOM. On delete, the store's `iriToContainerAndId(iri)` regex
+  expected the absolute http form (`https://w3id.org/multimodal-
+  annotator/ns/annotations/...`) and threw `Cannot parse annotation
+  IRI: mma:...` BEFORE the fetch — never opening a Network request.
+  POST happened to work because POST lets the backend mint the IRI;
+  only DELETE / PUT have to round-trip an existing IRI back to a URL.
+
+  Fix:
+  * New `src/store/iri-utils.js` centralises IRI normalization with
+    `expandIri(iri)` → absolute http form, `compactIri(iri)` → `mma:`
+    form, `iriEquals(a, b)` → namespace-aware equality, and
+    `setMmaNamespace(ns, prefix)` for future profile overrides. Both
+    namespace constants currently mirror `mma` in
+    `contexts/multimodal-context.jsonld`.
+  * `iriToContainerAndId` now calls `expandIri()` before the path
+    regex, so either compact or expanded inputs route to the same
+    URL. The error message on a genuinely-unparseable input now
+    quotes both the raw and the expanded forms so a future regression
+    is loud rather than mute.
+  * `store.remove()` also got an upfront `typeof iri !== 'string'`
+    guard and a try/catch around the parse: bad inputs now emit
+    `store:error` with `kind: 'validation'` and a clear message
+    (toast surfaces it) instead of throwing into the void.
+  * `tests/iri-utils.test.js` (new): 4 suites, 13 assertions covering
+    expand / compact / equals / namespace override.
+  * `tests/store.test.js` extended: `remove()` must produce the same
+    `DELETE` URL whether handed the compact or the expanded form, and
+    must emit `store:error[kind:'validation']` on garbage input.
+  * `npm test` now drives both files (`node --test tests/store.test.js
+    tests/iri-utils.test.js`). 30 tests, 30 green.
+
+  Architectural note: this compact-vs-expanded mismatch will resurface
+  in T1.6 (reload resolves cached annotations against the served DOM),
+  the SPARQL panel (T2.5), and the export function. All three will
+  route through `iri-utils.js` so the bug doesn't re-surface from a
+  different angle.
+
+  Diagnostic instrumentation introduced in commits `b04203a` and
+  `4f0198f` has been removed now that the cause is known. The
+  `__diag()` helper on the orchestrator host stays — it's a useful
+  inspection tool with negligible cost.
+
 - **T1.5b P0 bug** — Delete operations now actually hit the backend.
   Two compounding causes:
   * The IRI was stamped only on a subset of visual elements (`element`

@@ -36,6 +36,8 @@
  *               HTTP error the entry is reinstated and 'store:error' fires.
  */
 
+import { expandIri } from "./iri-utils.js";
+
 const TEMP_IRI_PREFIX = "temp:";
 let tempCounter = 0;
 
@@ -58,11 +60,19 @@ function shortMessage(op, error) {
 }
 
 function iriToContainerAndId(iri) {
-  // …/annotations/<container>/<id>   (and optionally /interpretation/<id>)
-  // We only need the (container, id) for the annotation itself.
-  const match = iri.match(/\/annotations\/([^\/]+)\/([^\/]+)(?:\/.*)?$/);
+  // Backend responses serialise IRIs in CURIE-compact form (`mma:…`)
+  // via JSON-LD compaction; URL routing needs the absolute http form.
+  // Normalise first so the regex below works for either input shape.
+  // See src/store/iri-utils.js for the namespace handling rationale.
+  const absolute = expandIri(iri);
+  const match = absolute.match(
+    /\/annotations\/([^\/]+)\/([^\/]+)(?:\/.*)?$/
+  );
   if (!match) {
-    throw new Error(`Cannot parse annotation IRI: ${iri}`);
+    throw new Error(
+      `Cannot parse annotation IRI: ${iri} (expanded: ${absolute}). ` +
+        `Expected …/annotations/<container>/<id>.`
+    );
   }
   return { container: match[1], id: match[2] };
 }
@@ -101,10 +111,6 @@ export class AnnotationStore extends EventTarget {
     if (body !== undefined) {
       init.headers["Content-Type"] = "application/ld+json";
       init.body = typeof body === "string" ? body : JSON.stringify(body);
-    }
-    // DEBUG (T1.5b P0 diag) — remove once delete is confirmed working.
-    if (typeof console !== "undefined" && console.debug) {
-      console.log(`[MMA Store] ${method} ${url}`);
     }
     const resp = await this._fetch(url, init);
     if (!resp.ok) {
@@ -259,10 +265,6 @@ export class AnnotationStore extends EventTarget {
 
   /** Delete an annotation. Optimistic: removes locally, reinstates on error. */
   async remove(iri, meta) {
-    // DEBUG (T1.5b P0 diag) — surface the IRI the orchestrator handed us.
-    if (typeof console !== "undefined" && console.debug) {
-      console.log(`[MMA Store] remove() called with iri = ${JSON.stringify(iri)}`);
-    }
     if (!iri || typeof iri !== "string") {
       const error = new Error(`remove() requires a string IRI, got ${typeof iri}`);
       this._emit("store:error", {
