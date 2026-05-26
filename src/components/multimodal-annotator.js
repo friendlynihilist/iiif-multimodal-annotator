@@ -2369,6 +2369,48 @@ export class IIIFInterimAnnotator extends HTMLElement {
         integration: 'https://w3id.org/geko/integration'
       }[modality];
 
+      // Painting target (always present in the linking case).
+      const paintingTarget = {
+        type: 'SpecificResource',
+        source: imageSelection.source,
+        selector: imageSelection.selector,
+        class: 'lrmoo:F1_Work', // LRMoo Work class
+        canvasId: imageSelection.canvasId || null,
+        canvasIndex: imageSelection.canvasIndex !== undefined ? imageSelection.canvasIndex : null,
+        canvasLabel: imageSelection.canvasLabel || null
+      };
+
+      // Facsimile target (added when the text selection came from PAGE-XML,
+      // see findPageXmlContext in iiif-text-panel.js). Anchors the
+      // ekphrastic text to its physical region on the manuscript canvas.
+      // When facsimile data is absent (plain-text / TEI source) we keep
+      // the legacy single-target shape so existing consumers don't break.
+      let targetField;
+      if (textSelection.facsimileCanvasId && textSelection.xywh) {
+        const { x, y, w, h } = textSelection.xywh;
+        const facsimileTarget = {
+          type: 'SpecificResource',
+          source: textSelection.facsimileCanvasId,
+          selector: {
+            type: 'FragmentSelector',
+            conformsTo: 'http://www.w3.org/TR/media-frags/',
+            value: `xywh=${x},${y},${w},${h}`
+          },
+          class: 'lrmoo:F2_Expression', // the linguistic-expression realisation lives on the manuscript page
+          lineId: textSelection.lineId || null,
+          coords: textSelection.coords || null, // original PAGE-XML polygon, preserved
+          pageNr: textSelection.pageNr || null
+        };
+        targetField = [facsimileTarget, paintingTarget];
+      } else {
+        // Backward-compatible single target — keep the original `type: 'Image'`
+        // shape so any consumer that was relying on it keeps working.
+        targetField = {
+          ...paintingTarget,
+          type: 'Image'
+        };
+      }
+
       annotation = {
         '@context': 'http://www.w3.org/ns/anno.jsonld',
         type: 'Annotation',
@@ -2381,15 +2423,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
           selector: textSelection.selector,
           class: 'lrmoo:F2_Expression' // LRMoo Expression class
         },
-        target: {
-          type: 'Image',
-          source: imageSelection.source,
-          selector: imageSelection.selector,
-          class: 'lrmoo:F1_Work', // LRMoo Work class
-          canvasId: imageSelection.canvasId || null,
-          canvasIndex: imageSelection.canvasIndex !== undefined ? imageSelection.canvasIndex : null,
-          canvasLabel: imageSelection.canvasLabel || null
-        },
+        target: targetField,
         property: modalityProperty,
         modality: modality,
         created: new Date().toISOString()

@@ -1,4 +1,52 @@
 /**
+ * Convert a PAGE-XML polygon points string ("x,y x,y x,y …") to a
+ * bounding-box {x, y, w, h} (Media Fragments xywh-compatible). Returns
+ * `null` if the input is empty or has no parseable numeric pair.
+ */
+function polygonToXywh(pointsString) {
+  if (!pointsString || typeof pointsString !== 'string') return null;
+  const pairs = pointsString.trim().split(/\s+/);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const pair of pairs) {
+    const idx = pair.indexOf(',');
+    if (idx < 0) continue;
+    const x = parseInt(pair.slice(0, idx), 10);
+    const y = parseInt(pair.slice(idx + 1), 10);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (!Number.isFinite(minX)) return null;
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/**
+ * Walk up the DOM from `node` to find the closest PAGE-XML line container
+ * (a `<div data-line-id data-coords>`) and the page container above it
+ * (the wrapper that carries `data-page-nr`). Returns `null` when the
+ * selection doesn't live under PAGE-XML structure (plain-text / TEI source).
+ */
+function findPageXmlContext(node) {
+  let el = node && node.nodeType === Node.ELEMENT_NODE ? node : node?.parentNode;
+  let lineEl = null;
+  let containerEl = null;
+  while (el && el.nodeType === Node.ELEMENT_NODE) {
+    if (!lineEl && el.dataset && el.dataset.lineId) lineEl = el;
+    if (!containerEl && el.dataset && el.dataset.pageNr) containerEl = el;
+    if (lineEl && containerEl) break;
+    el = el.parentNode;
+  }
+  if (!lineEl) return null;
+  return {
+    lineId: lineEl.dataset.lineId || null,
+    coords: lineEl.dataset.coords || null,
+    pageNr: containerEl?.dataset?.pageNr || null,
+  };
+}
+
+/**
  * Text panel component for displaying and selecting text portions
  * Supports word-level and character-level selection
  * Supports PAGE XML format (Transkribus)
@@ -16,6 +64,7 @@ export class IIIFTextPanel extends HTMLElement {
     this.pageXMLData = null; // Store parsed PAGE XML data
     this.currentPageNr = null; // Current page number
     this.metsData = null; // METS file data for page mapping
+    this.currentFacsimileCanvasId = null; // T1.4+ — last facsimile canvas IRI seen via the canvas-changed bus; used to anchor PAGE-XML selections back to their physical page on the manuscript.
   }
 
   static get observedAttributes() {
@@ -580,6 +629,22 @@ export class IIIFTextPanel extends HTMLElement {
       end: end
     };
 
+    // If the selection lives under a PAGE-XML line div, propagate the
+    // facsimile anchor (line id, original polygon, computed xywh, page
+    // number, canvas IRI). The orchestrator uses these to emit a
+    // SpecificResource target on the facsimile alongside the existing
+    // painting target — see createConnectionBetween in
+    // multimodal-annotator.js. Plain-text / TEI selections leave these
+    // fields undefined and the orchestrator falls back to single-target.
+    const pageXmlCtx = findPageXmlContext(range.startContainer);
+    if (pageXmlCtx) {
+      selectionData.lineId = pageXmlCtx.lineId;
+      selectionData.coords = pageXmlCtx.coords;            // original PAGE-XML polygon, preserved
+      selectionData.xywh = polygonToXywh(pageXmlCtx.coords); // bounding box for Media Fragments
+      selectionData.pageNr = pageXmlCtx.pageNr;
+      selectionData.facsimileCanvasId = this.currentFacsimileCanvasId;
+    }
+
     // Save current selection
     this.currentSelection = selectionData;
 
@@ -1056,6 +1121,14 @@ export class IIIFTextPanel extends HTMLElement {
     // Skip if this event is not from a facsimile panel
     if (detail.panelType !== 'facsimile') {
       return;
+    }
+
+    // Remember the facsimile canvas IRI so PAGE-XML text selections can be
+    // anchored back to their physical region on the manuscript when the
+    // user creates a linking annotation. The orchestrator emits this as
+    // the source of target[0] (facsimile SpecificResource).
+    if (detail.canvasId) {
+      this.currentFacsimileCanvasId = detail.canvasId;
     }
 
     if (!this.metsData) {
