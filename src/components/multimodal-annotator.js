@@ -1293,9 +1293,14 @@ export class IIIFInterimAnnotator extends HTMLElement {
       </div>
 
       <div class="toolbar">
-        <button id="export-btn" title="Export annotations">
+        <button id="export-btn" title="Export annotations (flat JSON-LD)">
           <svg viewBox="0 0 24 24">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+          </svg>
+        </button>
+        <button id="export-geko-btn" title="Export as GEKO Ekphrasis collection (3-level: Collection → Ekphrasis-per-page → Annotation)">
+          <svg viewBox="0 0 24 24">
+            <path d="M3 7h18M3 12h18M3 17h12M19 17l3-3M19 17l3 3"/>
           </svg>
         </button>
         <span class="status" id="status">Ready - Select and confirm text/image, then drag to link</span>
@@ -1419,6 +1424,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
   setupEventListeners() {
     const exportBtn = this.shadowRoot.getElementById('export-btn');
+    const exportGekoBtn = this.shadowRoot.getElementById('export-geko-btn');
     const modalityButtons = this.shadowRoot.querySelectorAll('.modality-btn');
     const addPanelBtn = this.shadowRoot.getElementById('add-panel-btn');
     const modalOverlay = this.shadowRoot.getElementById('modal-overlay');
@@ -1577,6 +1583,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
     });
 
     exportBtn.addEventListener('click', () => this.exportAnnotations());
+    exportGekoBtn.addEventListener('click', () => this.exportAnnotationsGeko());
 
     // Modality selector buttons
     modalityButtons.forEach(btn => {
@@ -2837,6 +2844,224 @@ Annotation Details:
     URL.revokeObjectURL(url);
 
     this.updateStatus(`Exported ${items.length} annotation(s)`);
+  }
+
+  // ── GEKO v2 export (Task B) ─────────────────────────────────────────
+
+  /**
+   * Export annotations as a 3-level GEKO v2 collection:
+   *
+   *   AnnotationCollection
+   *     └─ items[]: one geko:Ekphrasis per facsimile page
+   *         └─ items[]: the member oa:Annotation objects of that page
+   *
+   * Grouping key: the `source` of each annotation's target with class
+   * `lrmoo:F2_Expression` (the manuscript canvas). Annotations without
+   * a facsimile target — plain-text / TEI / standalone — land in a
+   * single "ungrouped" Ekphrasis with `mma:status mma:unanchored`
+   * (chosen design vs. grouping by painting canvas: simpler, doesn't
+   * fabricate a manuscript anchor that isn't there).
+   *
+   * GEKO v2 modality normalization on the way out (regardless of the
+   * raw v1 spelling): `denotation`/`dynamisation`/`integration` →
+   * `https://w3id.org/geko/#Denotation`/`#Dynamization`/`#Integration`
+   * (capitalized, `#` fragment separator per the GEKO 2 ontology;
+   * `dynamisation` → `Dynamization` with the z spelling pinned). The
+   * legacy `modality` and `property` fields are dropped in favour of
+   * a single `hasEkphrasticModality` skos:Concept reference.
+   *
+   * `hasAuthor`, `hasTextualReferent`, `hasIconicReferent` are
+   * intentionally omitted on each Ekphrasis and an explicit
+   * `rdfs:comment` flags the Phase 3 UI work that will fill them.
+   */
+  exportAnnotationsGeko() {
+    const annotations = (this.store ? this.store.all() : null) || this.annotations;
+    const baseNs = 'https://w3id.org/multimodal-annotator/ns/';
+    const container = this.container || 'unknown';
+
+    const groups = new Map();   // facsimileCanvasSource → [annotations]
+    const ungrouped = [];
+    for (const a of annotations) {
+      const key = this._facsimileSource(a);
+      if (key) {
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(a);
+      } else {
+        ungrouped.push(a);
+      }
+    }
+
+    const ekphrasisItems = [];
+    for (const [facsimileSource, members] of groups) {
+      const suffix = this._deriveEkphrasisSuffix(facsimileSource);
+      ekphrasisItems.push({
+        id: `${baseNs}ekphrases/${container}/${suffix}`,
+        type: ['Ekphrasis', 'AnnotationPage'],
+        label: { en: [`Ekphrasis on ${facsimileSource}`] },
+        comment: 'to be filled via UI (Phase 3)',
+        // hasAuthor / hasTextualReferent / hasIconicReferent intentionally
+        // omitted — the Phase 3 provenance + referent UI populates them.
+        items: members.map((m) => this._toGekoAnnotation(m)),
+      });
+    }
+    if (ungrouped.length > 0) {
+      ekphrasisItems.push({
+        id: `${baseNs}ekphrases/${container}/ungrouped`,
+        type: ['Ekphrasis', 'AnnotationPage'],
+        label: { en: ['Annotations without a facsimile anchor'] },
+        comment: 'these annotations have no PAGE-XML / facsimile source target (plain-text, TEI, or standalone); group them manually via the Phase 3 UI',
+        items: ungrouped.map((m) => this._toGekoAnnotation(m)),
+      });
+    }
+
+    // The exported file references the backend-served default context.
+    // Phase 3 may switch to inlining the context for a self-contained
+    // artefact; for now a URL keeps the export small and DRY.
+    const contextUrl = `${this._backendUrlForExport()}/contexts/interim-geko.jsonld`;
+
+    const collection = {
+      '@context': contextUrl,
+      type: 'AnnotationCollection',
+      label: 'Multimodal Annotator — GEKO Ekphrases',
+      created: new Date().toISOString(),
+      items: ekphrasisItems,
+    };
+
+    const blob = new Blob([JSON.stringify(collection, null, 2)], {
+      type: 'application/ld+json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mma-geko-${Date.now()}.jsonld`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    this.updateStatus(
+      `Exported ${ekphrasisItems.length} Ekphrasis group(s) ` +
+      `(${annotations.length} annotation(s) total)`
+    );
+  }
+
+  /** Return the `source` IRI of the facsimile target of `annotation`,
+   *  or null if none. Discriminates by `lrmoo:F2_Expression` class on
+   *  the target's type array (or full IRI suffix, post-round-trip). */
+  _facsimileSource(annotation) {
+    const targets = Array.isArray(annotation.target)
+      ? annotation.target
+      : [annotation.target].filter(Boolean);
+    for (const t of targets) {
+      if (this._isFacsimileTarget(t) && t.source) return t.source;
+    }
+    return null;
+  }
+
+  _isFacsimileTarget(target) {
+    if (!target || typeof target !== 'object') return false;
+    const tail = (v) => /(?:^|[#\/:])F2_Expression$/.test(String(v));
+    if (Array.isArray(target.type)) return target.type.some(tail);
+    if (target.type) return tail(target.type);
+    // The pre-round-trip cache entry might still carry `class` instead of `type`.
+    if (target.class) return tail(target.class);
+    return false;
+  }
+
+  _deriveEkphrasisSuffix(facsimileCanvasSource) {
+    if (!facsimileCanvasSource) return 'unknown';
+    // Use the last path segment of the canvas IRI, sanitised.
+    const stripped = facsimileCanvasSource.replace(/[?#].*$/, '');
+    const tail = stripped.split('/').filter(Boolean).pop() || 'unknown';
+    return tail.replace(/[^A-Za-z0-9_-]/g, '') || 'unknown';
+  }
+
+  /** Convert a raw cached annotation into its GEKO v2 export shape:
+   *  - drop `@context` (the outer collection's applies)
+   *  - drop the legacy `modality` / `property` / `annotationType` fields
+   *    (`annotationType` is an mma:-internal scratch field that has no
+   *    place in a GEKO export)
+   *  - strip `lrmoo:F2_Expression` from the body's `type` array — in
+   *    GEKO v2 the textual referent is declared on the Ekphrasis via
+   *    `hasTextualReferent`, not on each annotation's body. The body
+   *    type narrows to plain `TextualBody` to match the Bocchi
+   *    reference. The cache and the persisted RDF graph are
+   *    intentionally untouched; the strip happens only on the export
+   *    path.
+   *  - emit a single `hasEkphrasticModality` skos:Concept reference
+   *    using the v2 IRI shape (lowercase local part, `#` fragment;
+   *    z-spelling for `dynamization`).
+   */
+  _toGekoAnnotation(annotation) {
+    const {
+      '@context': _ctx,
+      modality,
+      property,
+      annotationType: _annType,
+      body,
+      ...rest
+    } = annotation;
+    const out = { ...rest };
+
+    if (body) out.body = this._cleanGekoBody(body);
+
+    const mod = this._normalizeModality(modality || property);
+    if (mod) {
+      out.hasEkphrasticModality = {
+        id: mod.iri,
+        type: 'skos:Concept',
+        label: { en: [mod.label] },
+      };
+    }
+    return out;
+  }
+
+  /** Strip the LRMoo class (`F2_Expression`) from `body.type` for the
+   *  GEKO export. If the remaining type list collapses to a single
+   *  value, emit it as a string (matches the Bocchi reference); a
+   *  multi-value list stays as an array. */
+  _cleanGekoBody(body) {
+    if (!body || typeof body !== 'object') return body;
+    const out = { ...body };
+    const isF2 = (v) => /(?:^|[#\/:])F2_Expression$/.test(String(v));
+    if (Array.isArray(out.type)) {
+      const kept = out.type.filter((v) => !isF2(v));
+      if (kept.length === 0) {
+        // Pathological case: body was typed *only* as F2_Expression.
+        // Fall back to plain TextualBody so the export still validates.
+        out.type = 'TextualBody';
+      } else if (kept.length === 1) {
+        out.type = kept[0];
+      } else {
+        out.type = kept;
+      }
+    } else if (typeof out.type === 'string' && isF2(out.type)) {
+      out.type = 'TextualBody';
+    }
+    return out;
+  }
+
+  /** Map a raw modality token / property IRI to its GEKO v2 form.
+   *  IRI local parts are lowercase per the GEKO 2 ontology
+   *  (`#denotation`, `#dynamization`, `#integration`); capitalization
+   *  lives only on the `prefLabel` / `label`. The `dynamization` (z)
+   *  spelling is forced regardless of the raw `dynamisation` (s). */
+  _normalizeModality(token) {
+    if (!token) return null;
+    const key = String(token).toLowerCase().split(/[#\/]/).pop();
+    const map = {
+      denotation:    { iri: 'https://w3id.org/geko/#denotation',   label: 'Denotation' },
+      dynamisation:  { iri: 'https://w3id.org/geko/#dynamization', label: 'Dynamization' },
+      dynamization:  { iri: 'https://w3id.org/geko/#dynamization', label: 'Dynamization' },
+      integration:   { iri: 'https://w3id.org/geko/#integration',  label: 'Integration' },
+    };
+    return map[key] || null;
+  }
+
+  /** Best-effort backend URL for the @context reference in the export.
+   *  Uses the orchestrator's configured backend URL if available,
+   *  otherwise the runtime default. */
+  _backendUrlForExport() {
+    return (this.getAttribute('backend-url')
+            || 'http://localhost:8000').replace(/\/$/, '');
   }
 
   getAnnotations() {
