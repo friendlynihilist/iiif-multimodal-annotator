@@ -65,6 +65,7 @@ export class IIIFTextPanel extends HTMLElement {
     this.currentPageNr = null; // Current page number
     this.metsData = null; // METS file data for page mapping
     this.currentFacsimileCanvasId = null; // T1.4+ — last facsimile canvas IRI seen via the canvas-changed bus; used to anchor PAGE-XML selections back to their physical page on the manuscript.
+    this._debugPageXml = false; // Toggle from DevTools to surface [MMA pagexml] traces; see _pageXmlLog().
   }
 
   static get observedAttributes() {
@@ -89,11 +90,14 @@ export class IIIFTextPanel extends HTMLElement {
       this.loadPageXML(this.getAttribute('pagexml'));
     }
 
-    // Listen for canvas changes from image panels
-    // Wait a bit to avoid initial loading conflicts
-    setTimeout(() => {
-      window.addEventListener('canvas-changed', (e) => this.handleCanvasChange(e));
-    }, 500);
+    // canvas-changed subscription happens synchronously in
+    // setupEventListeners() above. The historical 500ms setTimeout
+    // here caused the facsimile panel's initial dispatch (from
+    // loadCanvasByIndex during loadManifest) to land BEFORE the
+    // listener was attached, so currentFacsimileCanvasId stayed null
+    // and Task A's dual-target capture silently fell back to
+    // single-target. Fix verified 2026-05-27 (logs showed pageXmlCtx
+    // OK but facsimileCanvasId=null at first selection post-load).
   }
 
   attributeChangedCallback(name, oldValue, newValue) {
@@ -117,11 +121,16 @@ export class IIIFTextPanel extends HTMLElement {
           display: block;
           height: 100%;
           font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
-          --color-black: #000000;
-          --color-white: #ffffff;
-          --color-gray-200: #e5e5e5;
-          --color-gray-700: #404040;
-          --spacing-unit: 8px;
+          background: var(--mma-bg-base, #14161c);
+          color: var(--mma-text-primary, #e8e6f0);
+          /* Legacy aliases — values inherit from the orchestrator's :host
+             when this panel is hosted inside <multimodal-annotator>;
+             fallbacks keep the dark theme working in standalone use. */
+          --color-black:    var(--mma-bg-elevated, #1a1d26);
+          --color-white:    var(--mma-text-primary, #e8e6f0);
+          --color-gray-200: var(--mma-border, rgba(255,255,255,0.07));
+          --color-gray-700: var(--mma-text-muted, #9a9cab);
+          --spacing-unit:   8px;
         }
 
         .container {
@@ -131,10 +140,11 @@ export class IIIFTextPanel extends HTMLElement {
         }
 
         .controls {
-          padding: calc(var(--spacing-unit) * 1.5);
-          border-bottom: 1px solid var(--color-gray-200);
+          padding: 8px 12px;
+          border-bottom: 1px solid var(--mma-border, rgba(255,255,255,0.07));
+          background: var(--mma-bg-base, #14161c);
           display: flex;
-          gap: calc(var(--spacing-unit) * 1);
+          gap: 6px;
           align-items: center;
           flex-wrap: wrap;
         }
@@ -144,117 +154,128 @@ export class IIIFTextPanel extends HTMLElement {
         }
 
         .file-upload-btn {
-          width: 32px;
-          height: 32px;
+          width: 28px;
+          height: 28px;
           padding: 0;
-          border: 1px solid var(--color-gray-200);
-          border-radius: 0;
-          background: var(--color-white);
+          border: none;
+          border-radius: 6px;
+          background: var(--mma-surface-soft, rgba(255,255,255,0.04));
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
           flex-shrink: 0;
+          transition: background 0.12s ease;
         }
 
         .file-upload-btn svg {
-          width: 18px;
-          height: 18px;
-          stroke: var(--color-black);
+          width: 15px;
+          height: 15px;
+          stroke: var(--mma-text-muted, #9a9cab);
           fill: none;
-          stroke-width: 1.5;
+          stroke-width: 1.6;
+          transition: stroke 0.12s ease;
         }
 
         .file-upload-btn:hover {
-          background: var(--color-black);
-          border-color: var(--color-black);
+          background: var(--mma-surface-hover, rgba(255,255,255,0.08));
         }
 
         .file-upload-btn:hover svg {
-          stroke: var(--color-white);
+          stroke: var(--mma-text-primary, #e8e6f0);
         }
 
         .text-area {
           flex: 1;
-          padding: calc(var(--spacing-unit) * 3);
+          padding: 18px 22px 26px;
           overflow-y: auto;
-          line-height: 1.6;
-          font-size: 0.95rem;
+          /* Spectral on purpose — humanistic prose (manuscript
+             transcription), not UI text. The token --mma-font-serif
+             is set on the parent component's :host and inherits down
+             through the shadow boundary, so theme/font changes here
+             follow the parent automatically. */
+          font-family: var(--mma-font-serif, Spectral, Georgia, serif);
+          line-height: 1.9;
+          font-size: 14.5px;
+          font-weight: 400;
+          color: var(--mma-text-body);
+          background: var(--mma-bg-base);
           user-select: text;
         }
 
+        /* Highlights are computed from --mma-mod-* tokens via color-mix
+           so they swap automatically when the host's theme attribute
+           flips (dark↔light). The token values are defined on the
+           parent component and inherit through the shadow boundary. */
+
         .text-area::selection {
-          background: var(--color-gray-200);
+          background: color-mix(in srgb, var(--mma-accent) 28%, transparent);
+          color: var(--mma-text-primary);
         }
 
+        /* Pending highlight while the user is choosing what to do
+           with the selection. Once confirmed it morphs into the
+           underline style of .text-confirmed. */
         .text-selected {
-          background: #FFEB3B;
+          background: color-mix(in srgb, var(--mma-accent) 20%, transparent);
+          color: inherit;
           cursor: pointer;
-          transition: none;
-          padding: 0.1rem 0.2rem;
-          border-radius: 0;
+          padding: 0 1px;
+          border-bottom: 1.5px dashed var(--mma-accent-border);
         }
-
         .text-selected:hover {
-          background: #FDD835;
+          background: color-mix(in srgb, var(--mma-accent) 28%, transparent);
         }
 
+        /* Confirmed annotation — accent underline, not a solid box.
+           Reads as scholarly mark-up over the manuscript text. */
         .text-confirmed {
-          background: #81C784;
-          color: var(--color-white);
+          background: var(--mma-accent-bg);
+          color: inherit;
           cursor: grab;
-          transition: none;
-          padding: 0.1rem 0.2rem;
-          border-radius: 0;
-          box-shadow: none;
+          padding: 0 1px;
+          border-bottom: 1.5px solid var(--mma-accent);
+          position: relative;
+          transition: background 0.15s ease;
         }
-
         .text-confirmed:hover {
-          background: #66BB6A;
-          box-shadow: none;
-          transform: none;
+          background: color-mix(in srgb, var(--mma-accent) 32%, transparent);
         }
+        .text-confirmed:active { cursor: grabbing; }
 
-        .text-confirmed:active {
-          cursor: grabbing;
-        }
-
-        /* Modality colors for text boxes */
+        /* Modality-specific underline + tint — all derived from the
+           --mma-mod-* tokens, so they re-paint on theme switch. */
         .text-confirmed.denotation {
-          background: #2196F3;
+          background: color-mix(in srgb, var(--mma-mod-denotation) 20%, transparent);
+          border-bottom-color: var(--mma-mod-denotation);
         }
-
         .text-confirmed.denotation:hover {
-          background: #1976D2;
+          background: color-mix(in srgb, var(--mma-mod-denotation) 32%, transparent);
         }
 
         .text-confirmed.dynamisation {
-          background: #FF5722;
+          background: color-mix(in srgb, var(--mma-mod-dynamization) 22%, transparent);
+          border-bottom-color: var(--mma-mod-dynamization);
         }
-
         .text-confirmed.dynamisation:hover {
-          background: #E64A19;
+          background: color-mix(in srgb, var(--mma-mod-dynamization) 34%, transparent);
         }
 
         .text-confirmed.integration {
-          background: #9C27B0;
+          background: color-mix(in srgb, var(--mma-mod-integration) 22%, transparent);
+          border-bottom-color: var(--mma-mod-integration);
         }
-
         .text-confirmed.integration:hover {
-          background: #7B1FA2;
+          background: color-mix(in srgb, var(--mma-mod-integration) 34%, transparent);
         }
 
         .text-confirmed.transcription {
-          background: #4CAF50;
+          background: color-mix(in srgb, var(--mma-mod-dynamization) 18%, transparent);
+          border-bottom-color: var(--mma-mod-dynamization);
+          border-bottom-style: dashed;
         }
-
         .text-confirmed.transcription:hover {
-          background: #388E3C;
-        }
-
-        .text-confirmed {
-          cursor: pointer;
-          position: relative;
+          background: color-mix(in srgb, var(--mma-mod-dynamization) 28%, transparent);
         }
 
         /* Annotation info popup */
@@ -346,11 +367,12 @@ export class IIIFTextPanel extends HTMLElement {
         }
 
         .info {
-          font-size: 0.7rem;
-          color: var(--color-gray-700);
+          font-size: 11px;
+          color: var(--mma-text-faint, #5a5c69);
           width: 100%;
           flex-basis: 100%;
-          margin-top: calc(var(--spacing-unit) * 0.5);
+          margin-top: 4px;
+          font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
         }
 
         /* Annotation type selector */
@@ -532,6 +554,68 @@ export class IIIFTextPanel extends HTMLElement {
       }
       this.handleTextSelection();
     });
+
+    // Subscribe to facsimile canvas-changed events SYNCHRONOUSLY (no
+    // setTimeout). The previous 500ms delay produced a race where the
+    // facsimile panel's initial dispatch landed before this listener
+    // existed and currentFacsimileCanvasId stayed null, silently
+    // breaking Task A's PAGE-XML → facsimile target capture. Stash the
+    // bound handler so disconnectedCallback can unsubscribe cleanly
+    // and hot-reload doesn't accumulate listeners.
+    this._boundCanvasChange = (e) => this.handleCanvasChange(e);
+    window.addEventListener('canvas-changed', this._boundCanvasChange);
+    this._pageXmlLog('window canvas-changed listener attached SYNCHRONOUSLY in setupEventListeners');
+  }
+
+  disconnectedCallback() {
+    if (this._boundCanvasChange) {
+      window.removeEventListener('canvas-changed', this._boundCanvasChange);
+      this._boundCanvasChange = null;
+    }
+  }
+
+  /** Gated logger for PAGE-XML / facsimile-anchor diagnostics. The flag
+   *  is off by default so the demo console stays clean; an operator
+   *  can flip it on at runtime via DevTools:
+   *
+   *    document.querySelector('multimodal-annotator').debugPageXml(true)
+   *
+   *  (the orchestrator helper toggles the flag on every text panel),
+   *  or directly:
+   *
+   *    p = document.querySelector('multimodal-annotator')
+   *           .shadowRoot.querySelector('iiif-text-panel');
+   *    p._debugPageXml = true;
+   *
+   *  Then make a selection and watch the [MMA pagexml] traces. Race
+   *  conditions are subtle and this lets us re-investigate without
+   *  rebuilding. */
+  _pageXmlLog(...args) {
+    if (this._debugPageXml) console.log('[MMA pagexml]', ...args);
+  }
+
+  /** Safety net for the PAGE-XML facsimile-anchor flow (Task A part B):
+   *  walk up to the orchestrator host and query any sibling
+   *  iiif-image-panel typed as `facsimile` for its current canvas IRI.
+   *  Used when `currentFacsimileCanvasId` is still null at selection
+   *  time (the event-bus subscription missed the initial dispatch, or
+   *  HMR dropped the listener). Returns null if no facsimile panel is
+   *  reachable or none has a canvas loaded. */
+  _queryFacsimileCanvasIdFromSibling() {
+    try {
+      const host = this.getRootNode()?.host;
+      if (!host?.shadowRoot) return null;
+      const panels = host.shadowRoot.querySelectorAll(
+        'iiif-image-panel[panel-type="facsimile"]'
+      );
+      for (const p of panels) {
+        if (typeof p.getCurrentCanvasId === 'function') {
+          const id = p.getCurrentCanvasId();
+          if (id) return id;
+        }
+      }
+    } catch (_) { /* opaque shadow / detached / etc. — give up quietly */ }
+    return null;
   }
 
   async loadTextFromUrl(url) {
@@ -541,7 +625,14 @@ export class IIIFTextPanel extends HTMLElement {
 
       // Detect if XML
       if (url.endsWith('.xml') || text.trim().startsWith('<?xml')) {
-        this.parsePageXML(text);
+        const xmlType = this.detectXMLType(text);
+        if (xmlType === 'tei') {
+          this.parseTEIXML(text);
+        } else if (xmlType === 'page') {
+          this.parsePageXML(text);
+        } else {
+          this.updateInfo('Unknown XML format');
+        }
       } else {
         this.setTextContent(text);
       }
@@ -561,7 +652,14 @@ export class IIIFTextPanel extends HTMLElement {
 
       // Detect if XML based on file extension or content
       if (file.name.endsWith('.xml') || content.trim().startsWith('<?xml')) {
-        this.parsePageXML(content);
+        const xmlType = this.detectXMLType(content);
+        if (xmlType === 'tei') {
+          this.parseTEIXML(content);
+        } else if (xmlType === 'page') {
+          this.parsePageXML(content);
+        } else {
+          this.updateInfo('Unknown XML format');
+        }
       } else {
         this.setTextContent(content);
       }
@@ -636,7 +734,43 @@ export class IIIFTextPanel extends HTMLElement {
     // painting target — see createConnectionBetween in
     // multimodal-annotator.js. Plain-text / TEI selections leave these
     // fields undefined and the orchestrator falls back to single-target.
+
+    // (1) trace where the selection begins
+    const anchorNode = range.startContainer;
+    this._pageXmlLog('handleTextSelection — selection anchor', {
+      anchorNode,
+      anchorNodeType: anchorNode?.nodeType,
+      anchorNodeName: anchorNode?.nodeName,
+      anchorTextSample: typeof anchorNode?.textContent === 'string'
+        ? anchorNode.textContent.slice(0, 40)
+        : null,
+      anchorParentElement: anchorNode?.parentElement,
+      anchorParentTag: anchorNode?.parentElement?.tagName,
+      anchorParentDataset: anchorNode?.parentElement?.dataset
+        ? { ...anchorNode.parentElement.dataset }
+        : null,
+    });
+
+    // (2) walk the ancestor chain via findPageXmlContext
     const pageXmlCtx = findPageXmlContext(range.startContainer);
+    this._pageXmlLog('findPageXmlContext →',
+      pageXmlCtx ? pageXmlCtx : 'NOT FOUND (no <div data-line-id> ancestor)');
+
+    // Fallback (Task A part B): if the event-bus subscription hasn't
+    // produced a facsimile canvasId yet (race at startup, or HMR
+    // dropped the listener), query the orchestrator's sibling
+    // facsimile panel directly via its getCurrentCanvasId() API.
+    if (pageXmlCtx && !this.currentFacsimileCanvasId) {
+      const recovered = this._queryFacsimileCanvasIdFromSibling();
+      if (recovered) {
+        this.currentFacsimileCanvasId = recovered;
+        this._pageXmlLog('fallback lookup recovered facsimileCanvasId =', recovered);
+      }
+    }
+
+    // (3) what is currentFacsimileCanvasId at this moment?
+    this._pageXmlLog('currentFacsimileCanvasId =', this.currentFacsimileCanvasId);
+
     if (pageXmlCtx) {
       selectionData.lineId = pageXmlCtx.lineId;
       selectionData.coords = pageXmlCtx.coords;            // original PAGE-XML polygon, preserved
@@ -644,6 +778,15 @@ export class IIIFTextPanel extends HTMLElement {
       selectionData.pageNr = pageXmlCtx.pageNr;
       selectionData.facsimileCanvasId = this.currentFacsimileCanvasId;
     }
+
+    // (4) final selectionData PAGE-XML fields
+    this._pageXmlLog('selectionData PAGE-XML fields →', {
+      lineId: selectionData.lineId,
+      coords: selectionData.coords,
+      xywh: selectionData.xywh,
+      pageNr: selectionData.pageNr,
+      facsimileCanvasId: selectionData.facsimileCanvasId,
+    });
 
     // Save current selection
     this.currentSelection = selectionData;
@@ -885,6 +1028,137 @@ export class IIIFTextPanel extends HTMLElement {
   highlightAnnotation(annotation) {
     // TODO: Implement highlighting of existing annotations
     // This will wrap text segments in <mark> elements
+  }
+
+  // XML Detection and Parsing Methods
+
+  detectXMLType(xmlText) {
+    // Parse XML to detect type
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+    // Check for parsing errors
+    const parserError = xmlDoc.querySelector('parsererror');
+    if (parserError) {
+      console.error('XML parsing error:', parserError.textContent);
+      return null;
+    }
+
+    // Detect TEI XML (check for TEI namespace and root element)
+    const teiElement = xmlDoc.querySelector('TEI');
+    if (teiElement && teiElement.namespaceURI === 'http://www.tei-c.org/ns/1.0') {
+      return 'tei';
+    }
+
+    // Detect PAGE XML (check for Page element)
+    const pageElement = xmlDoc.querySelector('Page');
+    if (pageElement) {
+      return 'page';
+    }
+
+    return null;
+  }
+
+  parseTEIXML(xmlText) {
+    try {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+      // Check for parsing errors
+      const parserError = xmlDoc.querySelector('parsererror');
+      if (parserError) {
+        console.error('TEI XML parsing error:', parserError.textContent);
+        this.updateInfo('Error parsing TEI XML');
+        return;
+      }
+
+      // Extract text from TEI body
+      const bodyElement = xmlDoc.querySelector('body');
+      if (!bodyElement) {
+        this.updateInfo('No body element found in TEI XML');
+        return;
+      }
+
+      // Extract all page divs
+      const pageDivs = bodyElement.querySelectorAll('div[type="page"]');
+
+      if (pageDivs.length === 0) {
+        this.updateInfo('No page divs found in TEI XML');
+        return;
+      }
+
+      // Load first 10 pages
+      const pagesToLoad = Math.min(10, pageDivs.length);
+      const textParts = [];
+
+      for (let i = 0; i < pagesToLoad; i++) {
+        const pageDiv = pageDivs[i];
+        const pageText = this.extractTextFromTEIElement(pageDiv);
+
+        if (pageText.trim()) {
+          // Add page separator (except for the first page)
+          if (i > 0) {
+            textParts.push('\n\n--- Page ' + (i + 1) + ' ---\n\n');
+          }
+          textParts.push(pageText);
+        }
+      }
+
+      const fullText = textParts.join('');
+      this.setTextContent(fullText);
+      this.updateInfo(`Loaded TEI XML - Pages 1-${pagesToLoad} of ${pageDivs.length} (${fullText.length} characters)`);
+    } catch (error) {
+      console.error('Error parsing TEI XML:', error);
+      this.updateInfo('Error parsing TEI XML: ' + error.message);
+    }
+  }
+
+  extractTextFromTEIElement(element) {
+    // Recursively extract text from TEI element, handling special tags
+    let text = '';
+
+    element.childNodes.forEach(node => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        text += node.textContent;
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const tagName = node.nodeName.toLowerCase();
+
+        switch (tagName) {
+          case 'lb':
+            // Line break
+            text += '\n';
+            break;
+          case 'pb':
+            // Page break (already handled at div level)
+            break;
+          case 'add':
+            // Addition - include in text with brackets
+            text += ' [' + this.extractTextFromTEIElement(node) + '] ';
+            break;
+          case 'del':
+            // Deletion - skip or show with strikethrough (we'll skip for now)
+            // text += ' [deleted: ' + this.extractTextFromTEIElement(node) + '] ';
+            break;
+          case 'hi':
+            // Highlight - just include the text
+            text += this.extractTextFromTEIElement(node);
+            break;
+          case 'gap':
+            // Gap in text
+            text += '[...]';
+            break;
+          case 'unclear':
+            // Unclear text
+            text += '[' + this.extractTextFromTEIElement(node) + '?]';
+            break;
+          default:
+            // For all other elements, recursively extract text
+            text += this.extractTextFromTEIElement(node);
+        }
+      }
+    });
+
+    return text;
   }
 
   // PAGE XML Support Methods
@@ -1129,6 +1403,10 @@ export class IIIFTextPanel extends HTMLElement {
     // the source of target[0] (facsimile SpecificResource).
     if (detail.canvasId) {
       this.currentFacsimileCanvasId = detail.canvasId;
+      this._pageXmlLog('handleCanvasChange — recorded facsimile canvasId =',
+        detail.canvasId, '(canvasIndex', detail.canvasIndex, ', panelType', detail.panelType, ')');
+    } else {
+      this._pageXmlLog('handleCanvasChange — facsimile event WITHOUT canvasId!', detail);
     }
 
     if (!this.metsData) {

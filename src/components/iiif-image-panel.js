@@ -60,12 +60,17 @@ export class IIIFImagePanel extends HTMLElement {
           height: 100%;
           position: relative;
           font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
-          --color-black: #000000;
-          --color-white: #ffffff;
-          --color-gray-200: #e5e5e5;
-          --color-gray-300: #d4d4d4;
-          --color-gray-700: #404040;
-          --spacing-unit: 8px;
+          background: var(--mma-bg-base, #14161c);
+          color: var(--mma-text-primary, #e8e6f0);
+          /* Legacy aliases — inherit from <multimodal-annotator> when
+             hosted there; fallbacks keep the dark theme working stand-
+             alone. */
+          --color-black:    var(--mma-bg-elevated, #1a1d26);
+          --color-white:    var(--mma-text-primary, #e8e6f0);
+          --color-gray-200: var(--mma-border, rgba(255,255,255,0.07));
+          --color-gray-300: var(--mma-border-soft, rgba(255,255,255,0.04));
+          --color-gray-700: var(--mma-text-muted, #9a9cab);
+          --spacing-unit:   8px;
         }
 
         .container {
@@ -75,10 +80,11 @@ export class IIIFImagePanel extends HTMLElement {
         }
 
         .controls {
-          padding: calc(var(--spacing-unit) * 1.5);
-          border-bottom: 1px solid var(--color-gray-200);
+          padding: 8px 12px;
+          border-bottom: 1px solid var(--mma-border, rgba(255,255,255,0.07));
+          background: var(--mma-bg-base, #14161c);
           display: flex;
-          gap: calc(var(--spacing-unit) * 1);
+          gap: 6px;
           align-items: center;
           flex-wrap: wrap;
         }
@@ -86,57 +92,62 @@ export class IIIFImagePanel extends HTMLElement {
         input {
           flex: 1;
           min-width: 150px;
-          padding: calc(var(--spacing-unit) * 0.75);
-          border: 1px solid var(--color-gray-200);
-          border-radius: 0;
-          font-size: 0.75rem;
+          padding: 6px 8px;
+          border: 1px solid var(--mma-border, rgba(255,255,255,0.07));
+          border-radius: 6px;
+          font-size: 11px;
           font-family: inherit;
+          background: var(--mma-surface-soft, rgba(255,255,255,0.04));
+          color: var(--mma-text-body, #d2d0da);
+        }
+
+        input::placeholder {
+          color: var(--mma-text-faint, #5a5c69);
         }
 
         input:focus {
           outline: none;
-          border-color: var(--color-black);
+          border-color: var(--mma-accent, #7f77dd);
         }
 
         button {
-          width: 32px;
-          height: 32px;
+          width: 28px;
+          height: 28px;
           padding: 0;
-          border: 1px solid var(--color-gray-200);
-          border-radius: 0;
-          background: var(--color-white);
+          border: none;
+          border-radius: 6px;
+          background: var(--mma-surface-soft, rgba(255,255,255,0.04));
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: none;
+          transition: background 0.12s ease;
           flex-shrink: 0;
         }
 
         button svg {
-          width: 18px;
-          height: 18px;
-          stroke: var(--color-black);
+          width: 15px;
+          height: 15px;
+          stroke: var(--mma-text-muted, #9a9cab);
           fill: none;
-          stroke-width: 1.5;
+          stroke-width: 1.6;
+          transition: stroke 0.12s ease;
         }
 
         button:hover {
-          background: var(--color-black);
-          border-color: var(--color-black);
+          background: var(--mma-surface-hover, rgba(255,255,255,0.08));
         }
 
         button:hover svg {
-          stroke: var(--color-white);
+          stroke: var(--mma-text-primary, #e8e6f0);
         }
 
         button.active {
-          background: var(--color-black);
-          border-color: var(--color-black);
+          background: var(--mma-accent, #7f77dd);
         }
 
         button.active svg {
-          stroke: var(--color-white);
+          stroke: #ffffff;
         }
 
         /* Floating annotation type selector */
@@ -285,7 +296,12 @@ export class IIIFImagePanel extends HTMLElement {
         .viewer-container {
           flex: 1;
           position: relative;
-          background: #333;
+          background: var(--mma-bg-sunken, #1a1e28);
+          /* Image "breathes" inside the panel like art hung on a wall */
+          margin: 14px 16px 18px;
+          border-radius: 8px;
+          border: 1px solid var(--mma-border-soft, rgba(255,255,255,0.06));
+          overflow: hidden;
         }
 
         #openseadragon {
@@ -310,58 +326,56 @@ export class IIIFImagePanel extends HTMLElement {
           pointer-events: auto;
         }
 
+        /* Selection rect fills derived from the --mma-mod-* tokens via
+           color-mix so they swap on dark↔light. */
         .selection-rect {
           position: absolute;
-          border: 2px solid #FFC107;
-          background: rgba(255, 193, 7, 0.2);
+          border: 2px solid var(--mma-accent);
+          background: var(--mma-accent-bg);
           pointer-events: none;
           z-index: 101;
         }
 
         .selection-rect.confirmed {
-          border: 2px solid #4CAF50;
-          background: rgba(76, 175, 80, 0.3);
+          border: 2px solid var(--mma-accent);
+          background: var(--mma-accent-bg);
           z-index: 100;
           cursor: pointer;
-          transition: none;
           pointer-events: all;
           will-change: transform;
         }
 
-        /* Modality colors for image boxes */
         .selection-rect.confirmed.denotation {
-          border: 2px solid #2196F3;
-          background: rgba(33, 150, 243, 0.3);
+          border-color: var(--mma-mod-denotation);
+          background: color-mix(in srgb, var(--mma-mod-denotation) 20%, transparent);
         }
-
         .selection-rect.confirmed.denotation:hover {
-          border: 3px solid #1976D2;
-          background: rgba(25, 118, 210, 0.4);
+          border-width: 3px;
+          background: color-mix(in srgb, var(--mma-mod-denotation) 30%, transparent);
         }
 
         .selection-rect.confirmed.dynamisation {
-          border: 2px solid #FF5722;
-          background: rgba(255, 87, 34, 0.3);
+          border-color: var(--mma-mod-dynamization);
+          background: color-mix(in srgb, var(--mma-mod-dynamization) 22%, transparent);
         }
-
         .selection-rect.confirmed.dynamisation:hover {
-          border: 3px solid #E64A19;
-          background: rgba(230, 74, 25, 0.4);
+          border-width: 3px;
+          background: color-mix(in srgb, var(--mma-mod-dynamization) 34%, transparent);
         }
 
         .selection-rect.confirmed.integration {
-          border: 2px solid #9C27B0;
-          background: rgba(156, 39, 176, 0.3);
+          border-color: var(--mma-mod-integration);
+          background: color-mix(in srgb, var(--mma-mod-integration) 22%, transparent);
         }
-
         .selection-rect.confirmed.integration:hover {
-          border: 3px solid #7B1FA2;
-          background: rgba(123, 31, 162, 0.4);
+          border-width: 3px;
+          background: color-mix(in srgb, var(--mma-mod-integration) 34%, transparent);
         }
 
         .selection-rect.confirmed.transcription {
-          border: 2px solid #4CAF50;
-          background: rgba(76, 175, 80, 0.25);
+          border-color: var(--mma-mod-dynamization);
+          background: color-mix(in srgb, var(--mma-mod-dynamization) 18%, transparent);
+          border-style: dashed;
         }
 
         /* SVG freehand paths */
@@ -370,53 +384,47 @@ export class IIIFImagePanel extends HTMLElement {
           pointer-events: all;
           z-index: 100;
         }
+        svg.confirmed path { pointer-events: all; }
 
-        svg.confirmed path {
-          pointer-events: all;
-        }
-
-        /* Modality colors for SVG paths */
         svg.confirmed.denotation path {
-          stroke: #2196F3;
-          fill: rgba(33, 150, 243, 0.3);
+          stroke: var(--mma-mod-denotation);
+          fill: color-mix(in srgb, var(--mma-mod-denotation) 22%, transparent);
         }
-
         svg.confirmed.dynamisation path {
-          stroke: #FF5722;
-          fill: rgba(255, 87, 34, 0.3);
+          stroke: var(--mma-mod-dynamization);
+          fill: color-mix(in srgb, var(--mma-mod-dynamization) 22%, transparent);
         }
-
         svg.confirmed.integration path {
-          stroke: #9C27B0;
-          fill: rgba(156, 39, 176, 0.3);
+          stroke: var(--mma-mod-integration);
+          fill: color-mix(in srgb, var(--mma-mod-integration) 22%, transparent);
         }
-
         svg.confirmed.transcription path {
-          stroke: #4CAF50;
-          fill: rgba(76, 175, 80, 0.25);
+          stroke: var(--mma-mod-dynamization);
+          fill: color-mix(in srgb, var(--mma-mod-dynamization) 18%, transparent);
+          stroke-dasharray: 4,4;
         }
 
         .info {
-          font-size: 0.75rem;
-          color: var(--color-gray-700);
+          font-size: 11px;
+          color: var(--mma-text-faint, #5a5c69);
           margin-left: auto;
         }
 
         .help {
-          font-size: 0.75rem;
-          color: var(--color-gray-700);
-          padding: calc(var(--spacing-unit) * 1) calc(var(--spacing-unit) * 1.5);
-          background: var(--color-white);
-          border-bottom: 1px solid var(--color-gray-200);
+          font-size: 11px;
+          color: var(--mma-text-faint, #5a5c69);
+          padding: 6px 12px;
+          background: var(--mma-bg-base, #14161c);
+          border-bottom: 1px solid var(--mma-border-soft, rgba(255,255,255,0.04));
         }
 
         .navigation {
           display: flex;
           align-items: center;
-          gap: calc(var(--spacing-unit) * 1);
-          padding: calc(var(--spacing-unit) * 1) calc(var(--spacing-unit) * 1.5);
-          background: var(--color-white);
-          border-bottom: 1px solid var(--color-gray-200);
+          gap: 6px;
+          padding: 6px 12px;
+          background: var(--mma-bg-base, #14161c);
+          border-bottom: 1px solid var(--mma-border-soft, rgba(255,255,255,0.04));
         }
 
         .navigation.hidden {
@@ -424,51 +432,52 @@ export class IIIFImagePanel extends HTMLElement {
         }
 
         .nav-btn {
-          width: 32px;
-          height: 32px;
+          width: 28px;
+          height: 28px;
           padding: 0;
-          border: 1px solid var(--color-gray-200);
-          border-radius: 0;
-          background: var(--color-white);
+          border: none;
+          border-radius: 6px;
+          background: var(--mma-surface-soft, rgba(255,255,255,0.04));
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: none;
+          transition: background 0.12s ease;
         }
 
         .nav-btn svg {
-          width: 18px;
-          height: 18px;
-          stroke: var(--color-black);
+          width: 15px;
+          height: 15px;
+          stroke: var(--mma-text-muted, #9a9cab);
           fill: none;
-          stroke-width: 1.5;
+          stroke-width: 1.6;
+          transition: stroke 0.12s ease;
         }
 
         .nav-btn:hover:not(:disabled) {
-          background: var(--color-black);
-          border-color: var(--color-black);
+          background: var(--mma-surface-hover, rgba(255,255,255,0.08));
         }
 
         .nav-btn:hover:not(:disabled) svg {
-          stroke: var(--color-white);
+          stroke: var(--mma-text-primary, #e8e6f0);
         }
 
         .nav-btn:disabled {
-          opacity: 0.4;
+          opacity: 0.35;
           cursor: not-allowed;
         }
 
         .page-indicator {
-          font-size: 0.8rem;
-          color: var(--color-gray-700);
-          min-width: 80px;
+          font-size: 11px;
+          color: var(--mma-text-faint, #5a5c69);
+          min-width: 60px;
           text-align: center;
+          letter-spacing: 0.02em;
         }
 
         .canvas-label {
-          font-size: 0.75rem;
-          color: var(--color-gray-700);
+          font-size: 11px;
+          color: var(--mma-text-faint, #5a5c69);
           flex: 1;
           text-align: right;
         }

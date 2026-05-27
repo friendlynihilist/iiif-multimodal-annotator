@@ -4,6 +4,18 @@ const CONTAINER_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const DEFAULT_CONTAINER = 'demo-bologna';
 const DEFAULT_BACKEND_URL = 'http://localhost:8000';
 
+// Single source of truth for the user-visible product name. Used by
+// the header, the about modal, export labels, and (via
+// connectedCallback) document.title.
+//
+// The display name reverts to "INTERIM Annotator" (v3 cosmetic
+// revert), but the codebase identifiers — custom element tag,
+// package name, file names, RDF prefix mma: — stay "Multimodal
+// Annotator" per ADR 0001. Don't hardcode the display string
+// anywhere else: read APP_TITLE.
+const APP_TITLE = 'INTERIM Annotator';
+const APP_SUBTITLE = 'Semantic Annotator for Intermedial Relations';
+
 /**
  * Main container component for the Multimodal Annotator
  * (was: IIIF INTERIM Annotator — Phase 1 partial rename, see ADR 0001 and CLAUDE.md §"Phase 1 rename scope").
@@ -39,12 +51,65 @@ export class IIIFInterimAnnotator extends HTMLElement {
   }
 
   connectedCallback() {
+    // Keep the browser tab in sync with APP_TITLE so any rebrand only
+    // has to touch the constant. Preserves any subtitle the host page
+    // appended after an em-dash (e.g. "— Demo").
+    try {
+      const suffixMatch = /\s+—\s+(.+)$/.exec(document.title || '');
+      const suffix = suffixMatch ? ` — ${suffixMatch[1]}` : '';
+      document.title = `${APP_TITLE}${suffix}`;
+    } catch (_) { /* non-fatal */ }
+
+    // Apply persisted theme BEFORE render so the first paint is in the
+    // right palette (no dark→light flash on reload).
+    this._initTheme();
+
     this.render();
     this.setupEventListeners();
     this.setupScrollListeners();
     this.initializePanels();
     // Fire-and-forget; store errors surface through the toast stack.
     this._initStore();
+  }
+
+  /** Read persisted theme from localStorage (default: dark) and set
+   *  the data-theme attribute on the host. The CSS palette swap is
+   *  driven entirely by :host([data-theme="light"]). */
+  _initTheme() {
+    let saved = null;
+    try { saved = localStorage.getItem('mma:theme'); } catch (_) { /* no storage */ }
+    const theme = (saved === 'light' || saved === 'dark') ? saved : 'dark';
+    this._setTheme(theme, /* persist */ false);
+  }
+
+  /** Apply a theme and (optionally) persist it. Also swaps the
+   *  toggle button's sun/moon icon — the icon shows the OPPOSITE of
+   *  the current theme (sun in dark mode = "switch to light").
+   *
+   *  Mirrors the attribute to <html> so the Query view (mounted on
+   *  document.body, outside the shadow root) can re-skin via the
+   *  global stylesheet's :root[data-mma-theme="light"] block. */
+  _setTheme(theme, persist = true) {
+    this.setAttribute('data-theme', theme);
+    try { document.documentElement.setAttribute('data-mma-theme', theme); } catch (_) {}
+
+    if (persist) {
+      try { localStorage.setItem('mma:theme', theme); } catch (_) { /* no storage */ }
+    }
+    // Swap icon if the button is already rendered (i.e. after first render).
+    const btn = this.shadowRoot?.getElementById('theme-toggle-btn');
+    if (!btn) return;
+    const sun  = btn.querySelector('.theme-icon-sun');
+    const moon = btn.querySelector('.theme-icon-moon');
+    if (sun)  sun.style.display  = theme === 'dark'  ? '' : 'none';
+    if (moon) moon.style.display = theme === 'light' ? '' : 'none';
+    btn.setAttribute('aria-label', theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+  }
+
+  /** Flip dark↔light and persist. Wired to the header's toggle button. */
+  _toggleTheme() {
+    const current = this.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    this._setTheme(current === 'dark' ? 'light' : 'dark', /* persist */ true);
   }
 
   disconnectedCallback() {
@@ -59,6 +124,17 @@ export class IIIFInterimAnnotator extends HTMLElement {
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
     }
+
+    // Tear down the Query & Analytics light-DOM mount we attached to
+    // document.body at startup, plus the global stylesheet. We leave
+    // YASGUI's CDN <script>/<link> in place — they're idempotent and
+    // a re-mount of <multimodal-annotator> would reuse them.
+    if (this._queryViewMount?.parentNode) {
+      this._queryViewMount.parentNode.removeChild(this._queryViewMount);
+      this._queryViewMount = null;
+    }
+    const qStyle = document.getElementById('mma-query-view-style');
+    if (qStyle?.parentNode) qStyle.parentNode.removeChild(qStyle);
   }
 
   // ── T1.5b store integration ─────────────────────────────────────────
@@ -171,6 +247,1300 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     // Initial load. Errors are non-fatal and surface via the toast stack.
     this.store.load(this.container).catch(() => { /* surfaced by store:error */ });
+
+    // Build the Query & Analytics view container in LIGHT DOM (sibling
+    // of the orchestrator). YASGUI is known to fight with shadow DOM —
+    // mounting in light DOM avoids the CSS scoping headaches.
+    this._buildQueryView();
+
+    // Wire the tab strip
+    const tabAnnotate = this.shadowRoot.getElementById('tab-annotate');
+    const tabQuery    = this.shadowRoot.getElementById('tab-query');
+    tabAnnotate?.addEventListener('click', () => this._activateTab('annotate'));
+    tabQuery?.addEventListener('click',    () => this._activateTab('query'));
+  }
+
+  // ── T2.5 Query & Analytics tab ─────────────────────────────────────
+
+  /** SPARQL endpoint URL on the configured backend gateway. */
+  _sparqlEndpoint() {
+    const base = (this.getAttribute('backend-url') || DEFAULT_BACKEND_URL).replace(/\/$/, '');
+    return `${base}/sparql`;
+  }
+
+  /** Sample queries pre-loaded in the YASGUI dropdown. Predicates
+   *  verified live against the running triple store on 2026-05-27. */
+  _sampleQueries() {
+    return [
+      {
+        title: 'Annotations by modality',
+        query: [
+          'PREFIX oa:   <http://www.w3.org/ns/oa#>',
+          'PREFIX geko: <https://w3id.org/geko/>',
+          '',
+          'SELECT ?modality (COUNT(?ann) AS ?count) WHERE {',
+          '  GRAPH ?g {',
+          '    ?ann a oa:Annotation ;',
+          '         geko:hasEkphrasticModality ?modality .',
+          '  }',
+          '}',
+          'GROUP BY ?modality',
+          'ORDER BY DESC(?count)',
+        ].join('\n'),
+      },
+      {
+        title: 'Ekphrasis per facsimile page',
+        query: [
+          'PREFIX oa:    <http://www.w3.org/ns/oa#>',
+          'PREFIX lrmoo: <http://iflastandards.info/ns/lrm/lrmoo/>',
+          '',
+          'SELECT ?facsimile_canvas (COUNT(?ann) AS ?annotations) WHERE {',
+          '  GRAPH ?g {',
+          '    ?ann a oa:Annotation ;',
+          '         oa:hasTarget ?target .',
+          '    ?target a lrmoo:F2_Expression ;',
+          '            oa:hasSource ?facsimile_canvas .',
+          '  }',
+          '}',
+          'GROUP BY ?facsimile_canvas',
+          'ORDER BY DESC(?annotations)',
+        ].join('\n'),
+      },
+      {
+        title: 'All annotations: text + modality + visual-work canvas',
+        query: [
+          'PREFIX oa:    <http://www.w3.org/ns/oa#>',
+          'PREFIX geko:  <https://w3id.org/geko/>',
+          'PREFIX lrmoo: <http://iflastandards.info/ns/lrm/lrmoo/>',
+          'PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>',
+          '',
+          'SELECT ?text ?modality ?visual_work_canvas WHERE {',
+          '  GRAPH ?g {',
+          '    ?ann a oa:Annotation ;',
+          '         oa:hasBody ?body ;',
+          '         oa:hasTarget ?painting ;',
+          '         geko:hasEkphrasticModality ?modality .',
+          '    ?body rdf:value ?text .',
+          '    ?painting a lrmoo:F1_Work ;',
+          '              oa:hasSource ?visual_work_canvas .',
+          '  }',
+          '}',
+          'ORDER BY ?modality',
+        ].join('\n'),
+      },
+      {
+        title: 'Annotations created today',
+        query: [
+          'PREFIX oa:      <http://www.w3.org/ns/oa#>',
+          'PREFIX dcterms: <http://purl.org/dc/terms/>',
+          'PREFIX xsd:     <http://www.w3.org/2001/XMLSchema#>',
+          '',
+          'SELECT ?ann ?created WHERE {',
+          '  GRAPH ?g {',
+          '    ?ann a oa:Annotation ;',
+          '         dcterms:created ?created .',
+          '    BIND(STRBEFORE(STR(NOW()), "T") AS ?today)',
+          '    FILTER (STRSTARTS(STR(?created), ?today))',
+          '  }',
+          '}',
+          'ORDER BY DESC(?created)',
+        ].join('\n'),
+      },
+    ];
+  }
+
+  /** Create the Query & Analytics light-DOM view, hidden by default.
+   *  Lives at document.body level so YASGUI can take it over without
+   *  any shadow-DOM CSS scoping interference. Hidden via class until
+   *  the user switches to the Query tab. */
+  _buildQueryView() {
+    // Install a one-time global stylesheet that defines the Query
+    // view's surface tokens + YASGUI overrides. The orchestrator's
+    // shadow CSS doesn't reach light DOM, so we duplicate a small
+    // palette here. T3 may consolidate by moving the palette to :root.
+    if (!document.getElementById('mma-query-view-style')) {
+      const style = document.createElement('style');
+      style.id = 'mma-query-view-style';
+      style.textContent = `
+        /* Query view tokens — defined on :root because the Query view
+           is mounted on document.body (light DOM), outside the shadow
+           tree where the orchestrator's --mma-* tokens live. The
+           theme attribute is mirrored to <html> by _setTheme(), so
+           toggling dark↔light re-paints both worlds in lockstep. */
+        :root {
+          --mma-q-bg-base:      #1f2330;
+          --mma-q-bg-elevated:  #252937;
+          --mma-q-bg-sunken:    #14171f;
+          --mma-q-border:       rgba(255,255,255,0.08);
+          --mma-q-border-soft:  rgba(255,255,255,0.06);
+          --mma-q-text-primary: #ecf0f1;
+          --mma-q-text-body:    #d8dce5;
+          --mma-q-text-muted:   #b0b6c2;
+          --mma-q-text-label:   #a8aeba;
+          --mma-q-text-faint:   #7a8194;
+          --mma-q-accent:       #5dcaa5;
+          --mma-q-accent-ring:  rgba(93,202,165,0.35);
+          --mma-q-accent-ink:   #0e2920;
+          --mma-q-accent-bg:    rgba(93,202,165,0.18);
+          --mma-q-row-hover:    rgba(255,255,255,0.03);
+        }
+        :root[data-mma-theme="light"] {
+          --mma-q-bg-base:      #f8f7f3;
+          --mma-q-bg-elevated:  #ffffff;
+          --mma-q-bg-sunken:    #ebe9e2;
+          --mma-q-border:       rgba(0,0,0,0.07);
+          --mma-q-border-soft:  rgba(0,0,0,0.05);
+          --mma-q-text-primary: #1a1e28;
+          --mma-q-text-body:    #2a2e38;
+          --mma-q-text-muted:   #4a4f5c;
+          --mma-q-text-label:   #5a6070;
+          --mma-q-text-faint:   #6f7382;
+          --mma-q-accent:       #2a8169;
+          --mma-q-accent-ring:  rgba(42,129,105,0.35);
+          --mma-q-accent-ink:   #ffffff;
+          --mma-q-accent-bg:    rgba(42,129,105,0.16);
+          --mma-q-row-hover:    rgba(0,0,0,0.03);
+        }
+        #mma-query-view {
+          position: fixed;
+          top: 92px;
+          left: 0;
+          right: 0;
+          bottom: 48px;
+          display: none;
+          flex-direction: column;
+          background: var(--mma-q-bg-base);
+          color: var(--mma-q-text-primary);
+          font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+          z-index: 500;
+          overflow: hidden;
+        }
+        #mma-query-view.visible { display: flex; }
+
+        /* ─── Toolbar (left dropdown, right faint metadata) ─── */
+        .mma-query-toolbar {
+          padding: 20px 28px 16px;
+          border-bottom: 1px solid var(--mma-q-border);
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          gap: 24px;
+          flex-shrink: 0;
+        }
+        .mma-query-toolbar-left {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          min-width: 0;
+        }
+        .mma-query-toolbar-label {
+          font-size: 10px;
+          font-weight: 500;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: var(--mma-q-text-label, #a8adba);
+        }
+        .mma-query-preset {
+          height: 32px;
+          padding: 0 12px;
+          border: 1px solid var(--mma-q-border);
+          border-radius: 6px;
+          background: var(--mma-q-bg-elevated);
+          color: var(--mma-q-text-primary);
+          font-family: inherit;
+          font-size: 12.5px;
+          cursor: pointer;
+          min-width: 300px;
+        }
+        .mma-query-preset:focus {
+          outline: none;
+          border-color: var(--mma-q-accent-ring);
+        }
+        .mma-query-toolbar-right {
+          position: relative;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-family: 'JetBrains Mono', ui-monospace, monospace;
+          font-size: 11px;
+          line-height: 1.4;
+          white-space: nowrap;
+          color: var(--mma-q-text-faint);
+        }
+        .mma-query-shortcut {
+          color: var(--mma-q-text-faint);
+        }
+        /* Gear button — opens the endpoint settings popover (Bug B3). */
+        .mma-query-gear-btn {
+          width: 26px;
+          height: 26px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid var(--mma-q-border);
+          border-radius: 6px;
+          background: transparent;
+          color: var(--mma-q-text-faint);
+          cursor: pointer;
+          padding: 0;
+          transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+        }
+        .mma-query-gear-btn:hover {
+          color: var(--mma-q-text-primary);
+          border-color: var(--mma-q-border);
+          background: var(--mma-q-row-hover);
+        }
+        .mma-query-gear-btn[aria-expanded="true"] {
+          color: var(--mma-q-accent);
+          border-color: var(--mma-q-accent-ring);
+        }
+        .mma-query-settings-popover {
+          position: absolute;
+          top: calc(100% + 8px);
+          right: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          padding: 12px 14px;
+          background: var(--mma-q-bg-elevated);
+          border: 1px solid var(--mma-q-border);
+          border-radius: 6px;
+          box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+          z-index: 10;
+          min-width: 260px;
+        }
+        .mma-query-popover-label {
+          font-size: 9.5px;
+          font-weight: 500;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: var(--mma-q-text-label);
+          font-family: 'IBM Plex Sans', system-ui, sans-serif;
+        }
+        .mma-query-popover-value {
+          font-family: 'JetBrains Mono', ui-monospace, monospace;
+          font-size: 12px;
+          color: var(--mma-q-text-body);
+          word-break: break-all;
+        }
+
+        /* ─── YASGUI mount: takes all remaining height, internal scroll ─── */
+        .mma-query-yasgui {
+          flex: 1;
+          min-height: 0;        /* lets the flex child shrink below its content */
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          padding: 18px 28px 24px;
+        }
+        .mma-query-yasgui-loading {
+          padding: 40px 20px;
+          color: var(--mma-q-text-faint);
+          font-size: 13px;
+          text-align: center;
+        }
+        .mma-query-yasgui-error {
+          padding: 24px 20px;
+          color: #d77a72;
+          font-size: 13px;
+          background: rgba(215, 122, 114, 0.08);
+          border: 1px solid rgba(215, 122, 114, 0.3);
+          border-radius: 8px;
+          margin: 20px;
+        }
+
+        /* Layout-level YASGUI chrome only. Surface colours, fonts and
+           CodeMirror syntax theme are scoped into
+           _injectYasguiOverrides() which appends AFTER YASGUI's CDN
+           stylesheet — same-specificity rules win without !important. */
+        #mma-query-view .yasgui {
+          background: transparent;
+          border: none;
+        }
+        #mma-query-view .yasgui .tabsList {
+          background: transparent;
+          border-bottom: 1px solid var(--mma-q-border-soft);
+        }
+        #mma-query-view .yasgui .yasqe,
+        #mma-query-view .yasgui .yasr {
+          border: 1px solid var(--mma-q-border);
+          border-radius: 8px;
+        }
+        /* No margin-top on .yasr — the split-pane handle is the
+           separator now. (Was 10px; combined with .yasr_fallback_info
+           and YASR's plugin chrome it ate ~135px of table space.) */
+        #mma-query-view .yasgui .yasr { margin-top: 0; }
+        /* Run button — gold accent stays a layout concern (button is
+           outside the CodeMirror area, doesn't fight YASGUI defaults). */
+        #mma-query-view .yasgui .yasqe_buttons .yasqe_query {
+          background: var(--mma-q-accent);
+          color: var(--mma-q-accent-ink);
+          border: none;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    if (!this._queryViewMount) {
+      const wrap = document.createElement('div');
+      wrap.id = 'mma-query-view';
+      wrap.innerHTML = `
+        <div class="mma-query-toolbar">
+          <div class="mma-query-toolbar-left">
+            <span class="mma-query-toolbar-label">Sample query</span>
+            <select class="mma-query-preset" id="mma-query-preset">
+              <option value="">— pick a sample —</option>
+            </select>
+          </div>
+          <div class="mma-query-toolbar-right">
+            <span class="mma-query-shortcut" aria-hidden="true">⌘ + ↵ to execute</span>
+            <button class="mma-query-gear-btn" id="mma-query-gear-btn" type="button"
+                    title="Endpoint settings" aria-label="Endpoint settings" aria-expanded="false">
+              <!-- Minimal gear glyph; no icon font dependency. -->
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/>
+                <path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </button>
+            <div class="mma-query-settings-popover" id="mma-query-settings-popover" role="dialog" aria-label="Endpoint settings" hidden>
+              <span class="mma-query-popover-label">SPARQL endpoint</span>
+              <code class="mma-query-popover-value">${this._sparqlEndpoint()}</code>
+            </div>
+          </div>
+        </div>
+        <div class="mma-query-yasgui" id="mma-query-yasgui-mount">
+          <div class="mma-query-yasgui-loading">YASGUI will load on first use…</div>
+        </div>
+      `;
+      document.body.appendChild(wrap);
+      this._queryViewMount = wrap;
+
+      // Populate the preset dropdown
+      const select = wrap.querySelector('#mma-query-preset');
+      const presets = this._sampleQueries();
+      presets.forEach((q, i) => {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = q.title;
+        select.appendChild(opt);
+      });
+      select.addEventListener('change', (e) => {
+        const idx = parseInt(e.target.value, 10);
+        if (!Number.isInteger(idx)) return;
+        const q = presets[idx];
+        if (q && this._yasguiInstance) {
+          try {
+            const tab = this._yasguiInstance.getTab();
+            tab.setQuery(q.query);
+            // No autorun — let the user hit the play button explicitly
+            // so they see what they're about to send. (Phase 3 may add
+            // an autorun flag on demo presets.)
+          } catch (err) {
+            console.warn('[MMA Query] could not set query on YASGUI tab', err);
+          }
+        }
+      });
+
+      // Endpoint settings popover (Bug B3) — gear opens it, outside
+      // click or Esc closes it. Popover is just a static display of
+      // the resolved endpoint URL; editing it inline is a Phase 3
+      // concern (needs request-config persistence).
+      const gear    = wrap.querySelector('#mma-query-gear-btn');
+      const popover = wrap.querySelector('#mma-query-settings-popover');
+      if (gear && popover) {
+        const closePopover = () => {
+          popover.hidden = true;
+          gear.setAttribute('aria-expanded', 'false');
+        };
+        const openPopover = () => {
+          popover.hidden = false;
+          gear.setAttribute('aria-expanded', 'true');
+        };
+        gear.addEventListener('click', (e) => {
+          e.stopPropagation();
+          popover.hidden ? openPopover() : closePopover();
+        });
+        // Outside click → close (only when open).
+        document.addEventListener('click', (e) => {
+          if (popover.hidden) return;
+          if (popover.contains(e.target) || gear.contains(e.target)) return;
+          closePopover();
+        });
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && !popover.hidden) closePopover();
+        });
+      }
+    }
+  }
+
+  _activateTab(name) {
+    const isQuery = name === 'query';
+    const tabAnnotate = this.shadowRoot.getElementById('tab-annotate');
+    const tabQuery    = this.shadowRoot.getElementById('tab-query');
+    const mainWrapper = this.shadowRoot.querySelector('.main-wrapper');
+    const sidebar     = this.shadowRoot.querySelector('.sidebar');
+
+    tabAnnotate?.classList.toggle('active', !isQuery);
+    tabQuery?.classList.toggle('active', isQuery);
+    tabAnnotate?.setAttribute('aria-selected', String(!isQuery));
+    tabQuery?.setAttribute('aria-selected', String(isQuery));
+
+    if (mainWrapper) mainWrapper.classList.toggle('tab-query-active', isQuery);
+    if (sidebar) sidebar.style.visibility = isQuery ? 'hidden' : '';
+    if (this._queryViewMount) this._queryViewMount.classList.toggle('visible', isQuery);
+
+    if (isQuery) {
+      // Lazy-load YASGUI the first time the user opens the tab.
+      this._activateQueryView().catch((err) => {
+        console.warn('[MMA Query] YASGUI activation failed:', err);
+      });
+    }
+  }
+
+  /** Inject YASGUI CSS + JS from CDN once, idempotent. */
+  _loadYasgui() {
+    if (window.Yasgui) return Promise.resolve(window.Yasgui);
+    if (this._yasguiLoadingPromise) return this._yasguiLoadingPromise;
+
+    this._yasguiLoadingPromise = new Promise((resolve, reject) => {
+      // CSS
+      if (!document.getElementById('mma-yasgui-css')) {
+        const link = document.createElement('link');
+        link.id = 'mma-yasgui-css';
+        link.rel = 'stylesheet';
+        link.href = 'https://unpkg.com/@triply/yasgui/build/yasgui.min.css';
+        document.head.appendChild(link);
+      }
+      // JS
+      const existing = document.getElementById('mma-yasgui-js');
+      if (existing) {
+        // Already loading from a prior call — wait
+        existing.addEventListener('load', () => resolve(window.Yasgui));
+        existing.addEventListener('error', () => reject(new Error('YASGUI CDN load failed')));
+        return;
+      }
+      const script = document.createElement('script');
+      script.id = 'mma-yasgui-js';
+      script.src = 'https://unpkg.com/@triply/yasgui/build/yasgui.min.js';
+      script.onload = () => resolve(window.Yasgui);
+      script.onerror = () => reject(new Error('YASGUI CDN load failed'));
+      document.head.appendChild(script);
+    });
+    return this._yasguiLoadingPromise;
+  }
+
+  async _activateQueryView() {
+    if (this._yasguiInstance) return; // already initialized
+    const mount = this._queryViewMount?.querySelector('#mma-query-yasgui-mount');
+    if (!mount) return;
+    try {
+      const Yasgui = await this._loadYasgui();
+      // Now that YASGUI's CSS link is in <head>, inject our override
+      // stylesheet AFTER it — same-specificity rules of ours win the
+      // cascade without resorting to !important.
+      this._injectYasguiOverrides();
+
+      // Clear the loading placeholder before YASGUI takes over
+      mount.innerHTML = '';
+      // Optional: turn off persistence so the YASGUI tab state doesn't
+      // outlive the session (Phase 1 demo wants a clean canvas).
+      try { Yasgui.Yasr?.defaults?.persistencyExpire && (Yasgui.Yasr.defaults.persistencyExpire = 0); } catch (_) {}
+
+      // Default DataTables pageLength to 25 (was 50). Smaller initial
+      // row count = lighter DOM and a more responsive sticky-header
+      // scroll. Wrapped in try/catch because YASR's internal config
+      // shape changes between minor versions.
+      try {
+        const tableDefaults = Yasgui.Yasr?.plugins?.table?.defaults;
+        if (tableDefaults) tableDefaults.pageSize = 25;
+      } catch (_) {}
+
+      this._yasguiInstance = new Yasgui(mount, {
+        requestConfig: {
+          endpoint: this._sparqlEndpoint(),
+          // Use POST so big queries don't hit URL-length limits and
+          // CORS preflight matches what the backend already allows.
+          method: 'POST',
+        },
+        copyEndpointOnNewTab: false,
+        yasr: {
+          // Plugin-level config shape supported by YASGUI 4.x. If a
+          // future YASGUI ignores it, the post-render hook below
+          // catches the same default via the DataTables API.
+          pluginOrder: ['table', 'response', 'boolean'],
+          defaultPlugin: 'table',
+        },
+      });
+
+      // Belt + suspenders: when results render, walk into the active
+      // YASR's DataTables instance and force pageLength 25 if it
+      // wasn't picked up from the static defaults above.
+      try {
+        this._yasguiInstance.on?.('query', () => {
+          requestAnimationFrame(() => this._applyResultsPageSize(25));
+        });
+      } catch (_) {}
+
+      // Seed the first sample query into the active tab
+      const sample = this._sampleQueries()[0];
+      if (sample) {
+        try { this._yasguiInstance.getTab().setQuery(sample.query); } catch (_) {}
+      }
+
+      // Attach the resize handle once .yasqe + .yasr are in the DOM.
+      // YASGUI usually mounts them synchronously; retry a few frames
+      // if not, then give up (handle simply absent — layout still
+      // works at the CSS default 40/60).
+      let tries = 0;
+      const tryAttach = () => {
+        if (this._attachQueryResizeHandle()) return;
+        if (++tries < 30) requestAnimationFrame(tryAttach);
+      };
+      requestAnimationFrame(tryAttach);
+    } catch (err) {
+      mount.innerHTML = `
+        <div class="mma-query-yasgui-error">
+          Failed to load YASGUI from CDN. Check the network connection.
+          <br><small>${String(err?.message || err)}</small>
+        </div>
+      `;
+      throw err;
+    }
+  }
+
+  /** Inject a vertical resize handle between YASGUI's editor (.yasqe)
+   *  and results (.yasr) panes. Idempotent — bails out if the handle
+   *  is already present. Restores a persisted editor height from
+   *  localStorage. Drag listens on document so the cursor doesn't
+   *  flicker when the mouse exits the handle mid-drag. Dbl-click
+   *  resets to the 40% default. */
+  _attachQueryResizeHandle() {
+    const mount = this._queryViewMount?.querySelector('.mma-query-yasgui');
+    const yasgui = mount?.querySelector('.yasgui');
+    if (!yasgui) return false;
+    // YASGUI 4 keeps one .yasqe/.yasr pair PER TAB in the DOM —
+    // inactive tabs use display:none. Pick the visible pair via
+    // offsetParent (null = display:none anywhere up the chain).
+    const isVisible = (el) => el && el.offsetParent !== null;
+    const editors  = Array.from(yasgui.querySelectorAll('.yasqe'));
+    const results_ = Array.from(yasgui.querySelectorAll('.yasr'));
+    const editor   = editors.find(isVisible)  || editors[0];
+    const results  = results_.find(isVisible) || results_[0];
+    if (!editor || !results) return false;
+
+    // YASGUI 4 wraps .yasqe and .yasr in their OWN container divs
+    // (likely a React render boundary), so they don't share an
+    // immediate parent. Walk up from each until we hit a common
+    // ancestor — that's the real flex container. Then the immediate
+    // children of that ancestor in the .yasqe / .yasr chains ARE
+    // the flex items we need to size and insert the handle between.
+    const ancestors = new Set();
+    for (let p = editor; p; p = p.parentNode) ancestors.add(p);
+    let container = null;
+    for (let p = results; p; p = p.parentNode) {
+      if (ancestors.has(p)) { container = p; break; }
+    }
+    if (!container || container === editor || container === results) {
+      if (!this._dragAttachWarned) {
+        console.warn('[MMA Query] could not find common ancestor for .yasqe and .yasr; resize handle skipped');
+        this._dragAttachWarned = true;
+      }
+      return false;
+    }
+    const outerOf = (descendant) => {
+      let p = descendant;
+      while (p && p.parentNode !== container) p = p.parentNode;
+      return p;
+    };
+    const editorWrapper  = outerOf(editor);
+    const resultsWrapper = outerOf(results);
+    if (!editorWrapper || !resultsWrapper) return false;
+    if (container.querySelector(':scope > .mma-resize-handle')) return true; // already there
+
+    // Walk from container up to the .mma-query-yasgui mount, forcing
+    // the flex chain on every ancestor. YASGUI 4 inserts unstyled
+    // React render-boundary divs between .yasgui and the tab pane;
+    // any one of them missing `display:flex` or `min-height:0`
+    // breaks the chain and container collapses to content height
+    // (was 165.5px in user's log; should be ~600px). flex:1 1 auto
+    // not 1 1 0 — auto basis lets natural content seed the layout.
+    const forceFlexColumn = (el) => {
+      el.style.setProperty('display',        'flex',   '');
+      el.style.setProperty('flex-direction', 'column', '');
+      el.style.setProperty('min-height',     '0',      '');
+      el.style.setProperty('flex',           '1 1 auto', '');
+      el.style.setProperty('overflow',       'hidden', '');
+    };
+    // The container itself: force-grow + fill explicitly.
+    container.style.setProperty('display',        'flex',   '');
+    container.style.setProperty('flex-direction', 'column', '');
+    container.style.setProperty('min-height',     '0',      '');
+    container.style.setProperty('flex',           '1 1 auto', '');
+    container.style.setProperty('height',         '100%',   '');
+    // Climb up to .mma-query-yasgui (the mount we control via CSS)
+    // and propagate the flex chain on every intermediate ancestor.
+    let node = container.parentNode;
+    let steps = 0;
+    while (node && node !== mount && steps < 10) {
+      forceFlexColumn(node);
+      node = node.parentNode;
+      steps++;
+    }
+    // editorWrapper: explicit default basis so something non-trivial
+    // is allocated even before the user drags.
+    editorWrapper.style.flex      = '0 0 40%';
+    editorWrapper.style.minHeight = '120px';
+    editorWrapper.style.display   = 'flex';
+    editorWrapper.style.flexDirection = 'column';
+    editorWrapper.style.overflow  = 'hidden';
+    // resultsWrapper fills the rest.
+    resultsWrapper.style.flex     = '1 1 0';
+    resultsWrapper.style.minHeight = '0';
+    resultsWrapper.style.display  = 'flex';
+    resultsWrapper.style.flexDirection = 'column';
+    resultsWrapper.style.overflow = 'hidden';
+
+    const handle = document.createElement('div');
+    handle.className = 'mma-resize-handle';
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-orientation', 'horizontal');
+    handle.setAttribute('aria-label', 'Resize editor and results');
+    handle.title = 'Drag to resize · double-click to reset';
+    // Insert BETWEEN the two wrappers (siblings under container).
+    container.insertBefore(handle, resultsWrapper);
+
+    // Restore persisted size if any (else leave the 40% default).
+    this._applyEditorSplitFromStorage(editorWrapper, container);
+
+    // Helper: apply a height to the EDITOR'S WRAPPER (the actual
+    // flex item under container). Setting on .yasqe itself does
+    // nothing visible when YASGUI puts it inside an intermediate
+    // div — that intermediate div is what owns the flex line height.
+    const setEditorHeight = (px) => {
+      const v = `${px}px`;
+      editorWrapper.style.setProperty('height',      v, '');
+      editorWrapper.style.setProperty('flex-basis',  v, '');
+      editorWrapper.style.setProperty('flex-grow',   '0', '');
+      editorWrapper.style.setProperty('flex-shrink', '0', '');
+      editorWrapper.style.setProperty('min-height',  '120px', '');
+      // Also size the inner .yasqe so CodeMirror fills the wrapper.
+      if (editor !== editorWrapper) {
+        editor.style.height = '100%';
+        editor.style.minHeight = '0';
+      }
+    };
+
+    const onMove = (event) => {
+      // preventDefault during mousemove too — kills the text-selection
+      // ghost some browsers initiate even with body userSelect:none.
+      event.preventDefault();
+      const deltaY = event.clientY - this._dragStartY;
+      const containerH = this._dragContainerH;
+      let newHeight = this._dragStartEditorHeight + deltaY;
+      newHeight = Math.max(120, Math.min(containerH - 180, newHeight));
+      setEditorHeight(newHeight);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      try {
+        const h = Math.round(editorWrapper.getBoundingClientRect().height);
+        localStorage.setItem('mma:query-editor-height', String(h));
+      } catch (_) { /* no storage */ }
+    };
+    handle.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      this._dragStartY            = event.clientY;
+      this._dragStartEditorHeight = editorWrapper.getBoundingClientRect().height;
+      this._dragContainerH        = container.getBoundingClientRect().height;
+      handle.classList.add('dragging');
+      // Lock the cursor + suppress text selection across the whole
+      // document — prevents flicker if the cursor escapes the 6px
+      // handle during a fast drag.
+      document.body.style.cursor = 'ns-resize';
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    handle.addEventListener('dblclick', () => {
+      try { localStorage.removeItem('mma:query-editor-height'); } catch (_) {}
+      // Clear all locking properties on both wrapper and inner so
+      // YASGUI's default layout takes back over.
+      ['height', 'flex-basis', 'flex-grow', 'flex-shrink', 'min-height'].forEach((p) => {
+        editorWrapper.style.removeProperty(p);
+      });
+      if (editor !== editorWrapper) {
+        editor.style.removeProperty('height');
+        editor.style.removeProperty('min-height');
+      }
+      // Reseed the default basis so the divider settles back at 40%.
+      editorWrapper.style.flex = '0 0 40%';
+      editorWrapper.style.minHeight = '120px';
+    });
+    return true;
+  }
+
+  /** Read a persisted editor-wrapper height (px) from localStorage
+   *  and apply it via the flex-basis + grow/shrink lock the drag
+   *  uses. Rejected if:
+   *   - value is missing or NaN
+   *   - value equals or is below the 120px floor (almost certainly
+   *     a "stuck" artefact from a previous session where the drag
+   *     range collapsed to the minimum — auto-clear so the user
+   *     returns to the 40% default without manual intervention)
+   *   - value would leave less than 180px for the results table */
+  _applyEditorSplitFromStorage(editorWrapper, container) {
+    let saved = NaN;
+    try { saved = parseFloat(localStorage.getItem('mma:query-editor-height') || ''); }
+    catch (_) { /* no storage */ }
+    if (!Number.isFinite(saved) || saved <= 120) {
+      try { localStorage.removeItem('mma:query-editor-height'); } catch (_) {}
+      return;
+    }
+    const containerH = container.getBoundingClientRect().height;
+    if (containerH > 0 && saved > containerH - 180) {
+      try { localStorage.removeItem('mma:query-editor-height'); } catch (_) {}
+      return;
+    }
+    const v = `${saved}px`;
+    editorWrapper.style.setProperty('height',      v, '');
+    editorWrapper.style.setProperty('flex-basis',  v, '');
+    editorWrapper.style.setProperty('flex-grow',   '0', '');
+    editorWrapper.style.setProperty('flex-shrink', '0', '');
+    editorWrapper.style.setProperty('min-height',  '120px', '');
+  }
+
+  /** Reach into the active YASR's DataTables instance and set
+   *  pageLength. Called after every query because YASR recreates the
+   *  DataTable on each render, losing earlier API mutations. */
+  _applyResultsPageSize(size) {
+    try {
+      const wrap = this._queryViewMount?.querySelector('.dataTables_wrapper');
+      if (!wrap) return;
+      // Prefer the jQuery DataTables API that YASR bundles internally.
+      const tableEl = wrap.querySelector('table.dataTable');
+      const jq = window.jQuery || window.$;
+      if (tableEl && jq && jq.fn?.DataTable?.isDataTable?.(tableEl)) {
+        jq(tableEl).DataTable().page.len(size).draw();
+        return;
+      }
+      // Fallback: tweak the length select if YASR exposes it.
+      const sel = wrap.querySelector('.dataTables_length select');
+      if (sel) {
+        sel.value = String(size);
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    } catch (_) { /* best-effort, never throws */ }
+  }
+
+  /** Inject the YASGUI-specific overrides (font + syntax theme +
+   *  surface colours). Called AFTER YASGUI's CDN stylesheet so my
+   *  rules win the cascade at equal specificity without !important.
+   *  Idempotent. */
+  _injectYasguiOverrides() {
+    if (document.getElementById('mma-yasgui-overrides')) return;
+    const style = document.createElement('style');
+    style.id = 'mma-yasgui-overrides';
+    style.textContent = `
+      /* ── Editor surface (FIX B4) ───────────────────────────────────
+         Only bg + border + font + size are overridden. The SPARQL
+         syntax colouring is left to YASGUI/CodeMirror defaults per
+         the v3 spec (the user prefers the upstream palette). */
+      #mma-query-view .yasqe,
+      #mma-query-view .yasqe .CodeMirror {
+        background: var(--mma-q-bg-base);
+        border: 1px solid var(--mma-q-border-soft);
+        border-radius: 8px;
+        font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13.5px;
+        line-height: 1.55;
+      }
+      /* Default text colour only — let cm-* token rules win for syntax. */
+      #mma-query-view .yasqe .CodeMirror-line {
+        font-family: inherit;
+      }
+      #mma-query-view .yasqe .CodeMirror-gutters {
+        background: transparent;
+        border-right: 1px solid var(--mma-q-border-soft);
+      }
+      #mma-query-view .yasqe .CodeMirror-linenumber {
+        color: var(--mma-q-text-faint);
+        font-family: 'JetBrains Mono', ui-monospace, monospace;
+        font-size: 11.5px;
+      }
+
+      /* ── Full-height flex layout — internal scroll only ──────────
+         YASGUI's default layout lets the body grow with the result
+         set, which produces a page-level scroll. Force the chain
+         .yasgui > content-pane > .yasr > results-table to flex so
+         the table itself owns the scroll. */
+      #mma-query-view .yasgui {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      #mma-query-view .yasgui > .tabsList {
+        flex-shrink: 0;
+      }
+      /* The pane below .tabsList is whatever YASGUI emits — usually
+         .tabPanelsContainer or a plain div containing .yasqe + .yasr.
+         Match every non-tabsList direct child as a content pane. */
+      #mma-query-view .yasgui > *:not(.tabsList) {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      /* Editor: resizable. Default flex-basis 40% of the content
+         pane; JS overrides via inline style.height + flex-basis once
+         the user drags the handle or a persisted value is restored.
+         box-sizing forced to border-box so getBoundingClientRect()
+         returns a value consistent with what we feed back into
+         style.height — otherwise the cursor "scappa" mid-drag. */
+      #mma-query-view .yasqe {
+        flex: 0 0 40%;
+        height: 40%;
+        min-height: 120px;
+        box-sizing: border-box;
+      }
+      #mma-query-view .yasqe .CodeMirror {
+        height: 100%;
+        min-height: 0;
+        max-height: none;
+      }
+
+      /* Resize handle — 6px transparent hit zone between the editor
+         and results wrappers, with a 1×30px divider line at the
+         centre. Hover/drag brightens the line to the accent and
+         doubles its width. */
+      #mma-query-view .mma-resize-handle {
+        flex: 0 0 6px;
+        height: 6px;
+        background: transparent;
+        cursor: ns-resize;
+        position: relative;
+        user-select: none;
+        touch-action: none;
+        pointer-events: auto;
+        z-index: 5;
+      }
+      #mma-query-view .mma-resize-handle::before {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 30px;
+        height: 1px;
+        background: var(--mma-q-border);
+        transition: width 0.12s ease, height 0.12s ease, background 0.12s ease;
+      }
+      #mma-query-view .mma-resize-handle:hover::before,
+      #mma-query-view .mma-resize-handle.dragging::before {
+        width: 40px;
+        height: 2px;
+        background: var(--mma-q-accent);
+      }
+
+      /* Results: take the rest. min-height MUST be 0 — the canonical
+         flexbox pitfall is that a flex child defaults to min-height:
+         auto (≈ content-size), which prevents overflow:hidden from
+         clipping and the scroll on .yasr_results from ever scattering.
+         The 120px floor for the table is enforced by the drag clamp
+         (containerH - 180), so the table never collapses while the
+         user resizes. */
+      #mma-query-view .yasr {
+        flex: 1 1 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      /* Plugin selector strip stays fixed at the top of .yasr. */
+      #mma-query-view .yasr > .yasr_header,
+      #mma-query-view .yasr > .yasr_btnGroup {
+        flex-shrink: 0;
+      }
+      /* Any intermediate wrapper YASR may insert between .yasr and
+         .yasr_results must also be flex-shrinkable. The :not chain
+         MUST exclude .yasr_results — otherwise this rule's
+         overflow:hidden cascades onto the scrolling viewport itself
+         and kills it (self-inflicted regression caught by user
+         DevTools inspection). */
+      #mma-query-view .yasr > div:not(.yasr_header):not(.yasr_btnGroup):not(.yasr_results) {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      /* THE scroll surface. display: flex + flex-direction column
+         restored — without them DataTables' inner layout collapsed
+         and the rendered rows disappeared visually (the data was
+         still there in the DOM, just at zero height). margin/padding
+         explicitly zeroed to kill the "tantissimo padding" gap the
+         user reported between the plugin selector and the rows. */
+      #mma-query-view .yasr > .yasr_results,
+      #mma-query-view .yasr .yasr_results {
+        flex: 1 1 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+        overflow-x: auto;
+        margin: 0;
+        padding: 0;
+      }
+      /* DataTables wrapper inside .yasr_results — content grows
+         freely, parent (the scroller) clips. Width pinned so wide
+         literal columns don't blow past the viewport. */
+      #mma-query-view .yasr_results .dataTables_wrapper {
+        width: 100%;
+        max-width: 100%;
+        overflow: visible;
+      }
+      /* DataTables internal wrappers — must NOT introduce their own
+         scroll, or they break the sticky offset chain on the table
+         header. */
+      #mma-query-view .yasr .dataTables_wrapper,
+      #mma-query-view .yasr .dataTables_scrollBody {
+        overflow: visible;
+      }
+      /* Sticky column headers — pinned to .yasr_results viewport.
+         z-index: 2 keeps them above body rows but below any future
+         dropdown/popover plumbing. */
+      #mma-query-view .mma-query-yasgui .yasr_results table thead,
+      #mma-query-view .yasr table thead {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: var(--mma-q-bg-elevated);
+      }
+      #mma-query-view .yasr table thead th,
+      #mma-query-view .yasr table.dataTable thead th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: var(--mma-q-bg-elevated);
+        box-shadow: inset 0 -1px 0 var(--mma-q-border);
+      }
+
+      /* ── Ghost context menu (FIX 2) ──────────────────────────────
+         YASGUI's tabContextMenu is rendered eagerly and toggled on
+         right-click via inline style. Hide by default; the JS toggle
+         sets inline display:block which beats this rule (inline > CSS
+         without !important). Covers both inline-style and class-based
+         reveal patterns. */
+      #mma-query-view .yasgui .tabContextMenu,
+      #mma-query-view .yasgui [class*='ContextMenu'],
+      #mma-query-view .yasgui [class*='contextMenu'] {
+        display: none;
+      }
+      /* If YASGUI shows via class (.open / .shown / .visible) restore: */
+      #mma-query-view .yasgui .tabContextMenu.open,
+      #mma-query-view .yasgui .tabContextMenu.shown,
+      #mma-query-view .yasgui .tabContextMenu.visible {
+        display: block;
+      }
+
+      /* ── Hide YASGUI's internal endpoint URL bar (Bug B3) ────────
+         When still visible, clicking the input triggered the browser's
+         autocomplete dropdown for "localhost" entries — disorienting.
+         Settings live behind the gear icon in our toolbar instead. */
+      #mma-query-view .yasgui .endpoint,
+      #mma-query-view .yasgui .endpointText,
+      #mma-query-view .yasgui .requestConfig,
+      #mma-query-view .yasgui .yasqe_endpointText,
+      #mma-query-view .yasgui [class*='endpoint' i] input,
+      #mma-query-view .yasgui input[type='url'],
+      #mma-query-view .yasgui input[name*='endpoint' i] {
+        display: none;
+      }
+
+      /* ── Internal YASGUI tab strip — minimalist (FIX 2) ──────────
+         YASGUI tabs are the lower nav level; the upper one is the
+         shadow's ANNOTATE / QUERY & ANALYTICS strip. Differentiate
+         active by text weight + colour, NOT by a coloured underline
+         (that fought visually with the upper-level accent line).
+         Scoping is restricted to .tab only — broad li selectors
+         were masking YASGUI's mascot icon, which lives as another
+         child of .tabsList (FIX 1). */
+      #mma-query-view .yasgui .tabsList {
+        background: transparent;
+        border-bottom: 1px solid var(--mma-q-border);
+      }
+      #mma-query-view .yasgui .tabsList .tab {
+        color: var(--mma-q-text-faint);
+        font-family: 'IBM Plex Sans', system-ui, sans-serif;
+        font-size: 12px;
+        font-weight: 400;
+        letter-spacing: 0.01em;
+        border: 0;
+        border-bottom: 0;
+        background: transparent;
+        cursor: pointer;
+        transition: color 0.12s ease;
+      }
+      #mma-query-view .yasgui .tabsList .tab:hover {
+        color: var(--mma-q-text-muted);
+      }
+      #mma-query-view .yasgui .tabsList .tab.active,
+      #mma-query-view .yasgui .tabsList .tab.selected {
+        color: var(--mma-q-text-primary);
+        font-weight: 500;
+        border: 0;
+        border-bottom: 0;
+        background: transparent;
+      }
+
+      /* ── Results / YASR — dark coherent surface (FIX 4) ──────────
+         YASGUI ships a white table from DataTables.js. Re-skin the
+         whole results surface to the museale palette: elevated bg
+         for thead, base bg for cells, gold IRIs, faint lang tags. */
+      #mma-query-view .yasr,
+      #mma-query-view .yasr .yasr_results {
+        background: var(--mma-q-bg-base);
+        color: var(--mma-q-text-body);
+        border: none;
+      }
+      #mma-query-view .yasr table,
+      #mma-query-view .yasr table.dataTable {
+        background: var(--mma-q-bg-base);
+        color: var(--mma-q-text-body);
+        font-family: 'IBM Plex Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+        font-size: 13px;
+        border-collapse: collapse;
+        border-spacing: 0;
+        width: 100%;
+        border: none;
+        margin: 0;
+      }
+      /* Zero any spacing the DataTables theme puts between thead and
+         tbody. Browser default thead has no border, but DataTables'
+         CSS adds a thicker border-bottom that gets perceived as a gap
+         when combined with sticky positioning. */
+      #mma-query-view .yasr table thead,
+      #mma-query-view .yasr table.dataTable thead {
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+      #mma-query-view .yasr table tbody,
+      #mma-query-view .yasr table.dataTable tbody {
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+      #mma-query-view .yasr table tbody tr:first-child td,
+      #mma-query-view .yasr table.dataTable tbody tr:first-child td {
+        border-top: 0;
+      }
+      #mma-query-view .yasr table thead th,
+      #mma-query-view .yasr table.dataTable thead th {
+        background: var(--mma-q-bg-elevated);
+        color: var(--mma-q-text-label, #a8adba);
+        text-transform: uppercase;
+        letter-spacing: 0.10em;
+        font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 10.5px;
+        font-weight: 500;
+        border-bottom: 1px solid var(--mma-q-border);
+        border-top: none;
+        padding: 10px 14px;
+        text-align: left;
+      }
+      #mma-query-view .yasr table tbody td,
+      #mma-query-view .yasr table.dataTable tbody td {
+        background: var(--mma-q-bg-base);
+        color: var(--mma-q-text-body);
+        border-top: 1px solid var(--mma-q-border-soft);
+        border-bottom: none;
+        padding: 9px 14px;
+        word-break: break-word;
+      }
+      /* Row hover/selection use theme-aware tokens — never raw white,
+         which stood out as harshly bright over the dark surface (B2). */
+      #mma-query-view .yasr table tbody tr,
+      #mma-query-view .yasr table.dataTable tbody tr {
+        background: transparent;
+      }
+      #mma-query-view .yasr table tbody tr:hover td,
+      #mma-query-view .yasr table.dataTable tbody tr:hover td {
+        background: var(--mma-q-row-hover);
+      }
+      #mma-query-view .yasr table tbody tr.selected td,
+      #mma-query-view .yasr table.dataTable tbody tr.selected td {
+        background: var(--mma-q-accent-bg);
+      }
+      /* IRI / link */
+      #mma-query-view .yasr table a,
+      #mma-query-view .yasr table tbody a,
+      #mma-query-view .yasr .uri a {
+        color: var(--mma-q-accent);
+        text-decoration: none;
+      }
+      #mma-query-view .yasr table a:hover {
+        text-decoration: underline;
+      }
+      /* Language / datatype suffix YASR appends to literals */
+      #mma-query-view .yasr .lang,
+      #mma-query-view .yasr .yasr_literal_lang,
+      #mma-query-view .yasr .literalLang,
+      #mma-query-view .yasr .datatype,
+      #mma-query-view .yasr .literal-suffix {
+        color: var(--mma-q-text-faint);
+        font-size: 11px;
+        margin-left: 4px;
+      }
+
+      /* DataTables chrome (pagination, info, filter) */
+      #mma-query-view .yasr .dataTables_wrapper {
+        background: var(--mma-q-bg-base);
+        color: var(--mma-q-text-muted);
+        padding: 0;
+        margin: 0;
+      }
+      /* Zero all margins on EVERY direct child of .dataTables_wrapper
+         and force the table itself to have no top spacing. Defensive
+         against whatever divs DataTables wraps chrome in (.top/.bottom
+         /.row/etc varies by build). The visible chrome (info +
+         paginate) re-applies its own padding below. */
+      #mma-query-view .yasr .dataTables_wrapper > * {
+        margin: 0;
+      }
+      #mma-query-view .yasr table.dataTable,
+      #mma-query-view .yasr .dataTables_wrapper table {
+        margin: 0 !important;
+        border-spacing: 0;
+      }
+      /* Hide DataTables chrome (length, filter) plus the YASR-side
+         duplicates that DON'T use those classes — .tableFilter and
+         .pageSizeWrapper live inside .yasr_plugin_control. Also
+         hide the row/top Bootstrap wrappers DataTables sometimes
+         puts them in, which keep their own padding. */
+      #mma-query-view .yasr .dataTables_length,
+      #mma-query-view .yasr .dataTables_filter,
+      #mma-query-view .yasr .dataTables_wrapper > .top,
+      #mma-query-view .yasr .dataTables_wrapper > .row:first-child,
+      #mma-query-view .yasr .dataTables_wrapper > .row:has(.dataTables_length),
+      #mma-query-view .yasr .dataTables_wrapper > .row:has(.dataTables_filter),
+      #mma-query-view .yasr .tableFilter,
+      #mma-query-view .yasr .pageSizeWrapper,
+      #mma-query-view .yasr .tableControls .switch {
+        display: none;
+      }
+      /* ── The actual culprit found via DOM dump (h=97 of nothing
+         between the toolbar and .yasr_results). Empty fallback panel
+         that YASR allocates flex space to even when unused. YASGUI
+         sets inline style display:flex on it, so !important is the
+         only way to win — every other YASR element I targeted
+         responded to plain display:none. */
+      #mma-query-view .yasr .yasr_fallback_info,
+      #mma-query-view .yasr_fallback_info,
+      .yasr_fallback_info {
+        display: none !important;
+      }
+      /* YASR drops a generic spacer inside its header — kill. */
+      #mma-query-view .yasr .yasr_header .space_element {
+        display: none;
+      }
+      /* Column-resize grip handles inside the table — visually
+         redundant for a read-only demo and they introduce a thin
+         absolutely-positioned strip that confuses cursor:ns-resize. */
+      #mma-query-view .yasr .grip-container {
+        display: none;
+      }
+      /* YASR table plugin uses DataTables scrollY mode, which clones
+         the thead into .dataTables_scrollHead and leaves a HIDDEN
+         (visibility:hidden, NOT display:none) thead inside
+         .dataTables_scrollBody — that hidden thead takes its full
+         vertical space, producing the "huge padding" between visible
+         header and first row. Two-step fix:
+           - kill the scrollHead clone (we rely on sticky thead inside
+             the body table for the same effect)
+           - collapse the body table's thead so it consumes 0px */
+      #mma-query-view .yasr .dataTables_scrollHead {
+        display: none;
+      }
+      #mma-query-view .yasr .dataTables_scroll,
+      #mma-query-view .yasr .dataTables_scrollBody {
+        overflow: visible;
+        max-height: none;
+        height: auto;
+      }
+      /* If DataTables left the body thead with visibility:hidden,
+         neutralise the space it eats. Our sticky thead rule
+         (position:sticky on thead/th) brings it back visible. */
+      #mma-query-view .yasr .dataTables_scrollBody table thead,
+      #mma-query-view .yasr .dataTables_scrollBody table thead tr,
+      #mma-query-view .yasr .dataTables_scrollBody table thead th {
+        visibility: visible !important;
+        line-height: 1.3;
+      }
+      #mma-query-view .yasr .dataTables_info {
+        color: var(--mma-q-text-muted);
+        font-family: 'IBM Plex Sans', system-ui, sans-serif;
+        font-size: 11.5px;
+        padding: 6px 14px;
+      }
+      #mma-query-view .yasr .dataTables_paginate .paginate_button {
+        color: var(--mma-q-text-muted) !important;
+        background: transparent !important;
+        border: 1px solid var(--mma-q-border) !important;
+        border-radius: 4px !important;
+        padding: 4px 10px !important;
+        margin: 0 2px !important;
+      }
+      #mma-query-view .yasr .dataTables_paginate .paginate_button.current,
+      #mma-query-view .yasr .dataTables_paginate .paginate_button.current:hover {
+        color: var(--mma-q-accent-ink) !important;
+        background: var(--mma-q-accent) !important;
+        border-color: var(--mma-q-accent) !important;
+      }
+      #mma-query-view .yasr .dataTables_paginate .paginate_button.disabled {
+        opacity: 0.4;
+      }
+
+      /* YASR plugin tab strip (Table / Raw / Pivot / Chart) —
+         compact: no padding below the buttons, divider goes right
+         against the table thead. */
+      #mma-query-view .yasr .yasr_btnGroup,
+      #mma-query-view .yasr .yasr_header {
+        background: transparent;
+        border-bottom: 1px solid var(--mma-q-border-soft);
+        padding: 4px 10px 0;
+        margin: 0;
+      }
+      #mma-query-view .yasr .yasr_btnGroup .yasr_btn,
+      #mma-query-view .yasr .yasr_btn {
+        background: transparent;
+        color: var(--mma-q-text-muted);
+        border: 1px solid transparent;
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 11.5px;
+      }
+      #mma-query-view .yasr .yasr_btn:hover {
+        color: var(--mma-q-text-primary);
+        border-color: var(--mma-q-border);
+      }
+      #mma-query-view .yasr .yasr_btn.selected,
+      #mma-query-view .yasr .yasr_btn.btn_active,
+      #mma-query-view .yasr .yasr_btn.active {
+        color: var(--mma-q-accent);
+        border-color: var(--mma-q-accent-ring);
+        background: var(--mma-q-accent-bg);
+      }
+    `;
+    document.head.appendChild(style);
   }
 
   /** Stamp the given IRI onto every visual surface in `meta`. SVG and
@@ -263,21 +1633,103 @@ export class IIIFInterimAnnotator extends HTMLElement {
   render() {
     this.shadowRoot.innerHTML = `
       <style>
+        /* Design system v3 (Phase 1).
+         * Teal accent, day/night dual theme, three typefaces:
+         *   JetBrains Mono — app title, profile badge, export labels
+         *   IBM Plex Sans  — generic UI chrome
+         *   Spectral       — transcription body ONLY (no other serif use)
+         * Theme switch lives on the host's data-theme attribute; the
+         * default is dark, light overrides follow below. */
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Spectral:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
         :host {
+          /* ── Typography vars (used by every rule below) ── */
+          --mma-font-mono:  'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          --mma-font-sans:  'IBM Plex Sans', system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+          --mma-font-serif: Spectral, Georgia, "Times New Roman", serif;
+
+          /* ── DARK palette (default) ── */
+          --mma-bg-base:      #1f2330;
+          --mma-bg-elevated:  #252937;
+          --mma-bg-sunken:    #14171f;
+          --mma-surface-soft: rgba(255,255,255,0.05);
+          --mma-surface-hover:rgba(255,255,255,0.09);
+          --mma-border:       rgba(255,255,255,0.08);
+          --mma-border-soft:  rgba(255,255,255,0.06);
+          --mma-divider:      rgba(255,255,255,0.15);
+          --mma-text-primary: #ecf0f1;
+          --mma-text-body:    #d8dce5;
+          --mma-text-muted:   #b0b6c2;
+          --mma-text-label:   #a8aeba;
+          --mma-text-faint:   #7a8194;
+          --mma-accent:       #5dcaa5;
+          --mma-accent-ink:   #0e2920;
+          --mma-accent-bg:    rgba(93,202,165,0.18);
+          --mma-accent-border:rgba(93,202,165,0.35);
+          --mma-row-hover:    rgba(255,255,255,0.03);
+          --mma-backdrop:     rgba(0,0,0,0.5);
+
+          /* Modality tokens — re-pointed for v3 */
+          --mma-mod-denotation:   #5dcaa5;
+          --mma-mod-dynamization: #7da9d6;
+          --mma-mod-integration:  #d09b7a;
+
+          /* Back-compat aliases (legacy names still used across this
+             file and child components — keep them pointing at the new
+             tokens so every existing rule resolves without rewrites). */
+          --mma-accent-soft:  var(--mma-accent-bg);
+          --mma-accent-ring:  var(--mma-accent-border);
+          --mma-modality-denotation:   var(--mma-mod-denotation);
+          --mma-modality-dynamization: var(--mma-mod-dynamization);
+          --mma-modality-integration:  var(--mma-mod-integration);
+          --mma-panel-text:      var(--mma-mod-denotation);
+          --mma-panel-facsimile: var(--mma-mod-dynamization);
+          --mma-panel-image:     var(--mma-mod-integration);
+
+          --color-black:    var(--mma-bg-elevated);
+          --color-white:    var(--mma-text-primary);
+          --color-gray-100: var(--mma-surface-soft);
+          --color-gray-200: var(--mma-border);
+          --color-gray-300: var(--mma-border-soft);
+          --color-gray-700: var(--mma-text-muted);
+          --color-accent:   var(--mma-accent);
+          --spacing-unit:   8px;
+
           display: flex;
           flex-direction: column;
           width: 100%;
           height: 100vh;
-          font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
-          background: #f8f6f2;
-          --color-black: #3b3f9f;
-          --color-white: #f8f6f2;
-          --color-gray-100: #ebe9e5;
-          --color-gray-200: #dbd8d2;
-          --color-gray-300: #c5c2bc;
-          --color-gray-700: #5a5850;
-          --color-accent: #6bd8a4;
-          --spacing-unit: 8px;
+          font-family: var(--mma-font-sans);
+          background: var(--mma-bg-base);
+          color: var(--mma-text-primary);
+        }
+
+        /* ── LIGHT palette ── re-points every token; the rules below
+           don't need to know which theme is active. */
+        :host([data-theme="light"]) {
+          --mma-bg-base:      #f8f7f3;   /* avorio tenue, NOT pure white */
+          --mma-bg-elevated:  #ffffff;
+          --mma-bg-sunken:    #ebe9e2;
+          --mma-surface-soft: rgba(0,0,0,0.04);
+          --mma-surface-hover:rgba(0,0,0,0.06);
+          --mma-border:       rgba(0,0,0,0.07);
+          --mma-border-soft:  rgba(0,0,0,0.05);
+          --mma-divider:      rgba(0,0,0,0.15);
+          --mma-text-primary: #1a1e28;
+          --mma-text-body:    #2a2e38;
+          --mma-text-muted:   #4a4f5c;
+          --mma-text-label:   #5a6070;
+          --mma-text-faint:   #6f7382;
+          --mma-accent:       #2a8169;
+          --mma-accent-ink:   #ffffff;
+          --mma-accent-bg:    rgba(42,129,105,0.16);
+          --mma-accent-border:rgba(42,129,105,0.35);
+          --mma-row-hover:    rgba(0,0,0,0.03);
+          --mma-backdrop:     rgba(0,0,0,0.3);
+
+          --mma-mod-denotation:   #2a8169;
+          --mma-mod-dynamization: #4a7aa3;
+          --mma-mod-integration:  #a26b48;
         }
 
         .app-header {
@@ -285,86 +1737,211 @@ export class IIIFInterimAnnotator extends HTMLElement {
           top: 0;
           left: 0;
           right: 0;
-          height: 48px;
-          background: var(--color-black);
-          color: var(--color-white);
+          height: 52px;
+          background: var(--mma-bg-elevated);
+          color: var(--mma-text-primary);
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 calc(var(--spacing-unit) * 2);
+          padding: 0 20px;
           z-index: 10000;
-          border-bottom: 1px solid var(--color-black);
+          border-bottom: 1px solid var(--mma-border);
+        }
+
+        .app-title-group {
+          display: flex;
+          align-items: baseline;
+          gap: 12px;
+          line-height: 1.1;
+          min-width: 0;
         }
 
         .app-title {
-          font-size: 1rem;
-          font-weight: 400;
-          letter-spacing: 0.05em;
-          text-transform: uppercase;
+          font-family: var(--mma-font-mono);
+          font-size: 16px;
+          font-weight: 500;
+          letter-spacing: -0.01em;
+          color: var(--mma-text-primary);
+          white-space: nowrap;
         }
 
-        .app-info-btn {
-          width: 32px;
-          height: 32px;
-          border: 1px solid var(--color-white);
-          border-radius: 0;
+        .app-title-divider {
+          display: inline-block;
+          width: 1px;
+          height: 14px;
+          background: var(--mma-divider);
+          align-self: center;
+          flex-shrink: 0;
+        }
+
+        .app-subtitle {
+          font-family: var(--mma-font-sans);
+          font-size: 11px;
+          font-weight: 400;
+          letter-spacing: 0.02em;
+          color: var(--mma-text-faint);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .app-header-actions {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .profile-badge {
+          padding: 4px 10px;
+          font-family: var(--mma-font-mono);
+          font-size: 11px;
+          font-weight: 500;
+          color: var(--mma-accent);
           background: transparent;
-          color: var(--color-white);
-          font-size: 1rem;
+          border: 0.5px solid var(--mma-accent-border);
+          border-radius: 4px;
+          letter-spacing: 0.02em;
+        }
+
+        .app-icon-btn {
+          width: 30px;
+          height: 30px;
+          border: 1px solid var(--mma-border);
+          border-radius: 6px;
+          background: transparent;
+          color: var(--mma-text-muted);
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: none;
+          padding: 0;
+          transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
         }
 
-        .app-info-btn:hover {
-          background: var(--color-white);
-          color: var(--color-black);
+        .app-icon-btn:hover {
+          background: var(--mma-surface-soft);
+          color: var(--mma-text-primary);
+          border-color: var(--mma-divider);
+        }
+
+        .app-icon-btn svg {
+          width: 15px;
+          height: 15px;
+          stroke: currentColor;
+          fill: none;
+          stroke-width: 1.6;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+        }
+
+        .app-info-btn { /* legacy hook for click wiring */ }
+
+        /* ── Tab strip (T2.5) — sits below header, above content.
+           Switches between Annotate (the existing 3-panel view) and
+           Query & Analytics (light-DOM YASGUI view). State of either
+           view is preserved when switching: we toggle visibility, never
+           unmount the panels. */
+        .tab-strip {
+          position: fixed;
+          top: 52px;
+          left: 0;
+          right: 0;
+          height: 40px;
+          background: var(--mma-bg-elevated);
+          border-bottom: 1px solid var(--mma-border);
+          display: flex;
+          align-items: center;
+          padding: 0 20px;
+          gap: 28px;
+          z-index: 9999;
+        }
+
+        .tab {
+          display: inline-flex;
+          align-items: center;
+          height: 100%;
+          padding: 0 2px;
+          background: transparent;
+          border: none;
+          border-bottom: 2px solid transparent;
+          font-family: var(--mma-font-sans);
+          font-size: 10.5px;
+          font-weight: 500;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: var(--mma-text-faint);
+          cursor: pointer;
+          /* Kill the browser's default blue focus ring — it sat just
+             above the active tab's accent underline and looked like a
+             second, contrasting line (Query view bug B1). Keyboard
+             users still get a visible focus state via :focus-visible. */
+          outline: none;
+          -webkit-tap-highlight-color: transparent;
+          transition: color 0.15s ease, border-color 0.15s ease;
+        }
+        .tab:focus { outline: none; }
+        .tab:focus-visible {
+          outline: 1px solid var(--mma-accent-border);
+          outline-offset: -3px;
+        }
+        .tab:hover { color: var(--mma-text-muted); }
+        .tab.active {
+          color: var(--mma-text-primary);
+          border-bottom-color: var(--mma-accent);
         }
 
         .main-wrapper {
           display: flex;
           width: 100%;
-          height: calc(100vh - 48px);
-          margin-top: 48px;
+          height: calc(100vh - 92px);
+          margin-top: 92px;
+        }
+
+        .main-wrapper.tab-query-active {
+          /* In Query view we hide the sidebar + panels area, so the
+             light-DOM YASGUI mount can span the full content width.
+             Wrapper still occupies its slot so the footer stays
+             aligned, but its content is empty. */
+          visibility: hidden;
+          pointer-events: none;
         }
 
         .sidebar {
           position: fixed;
           left: 0;
-          top: 48px;
+          top: 92px;
           width: 48px;
-          height: calc(100vh - 48px);
-          background: var(--color-black);
+          height: calc(100vh - 92px);
+          background: var(--mma-bg-elevated);
           display: flex;
           flex-direction: column;
           align-items: center;
-          padding: calc(var(--spacing-unit) * 1.5) 0;
-          gap: calc(var(--spacing-unit) * 1);
-          border-right: 1px solid var(--color-black);
+          padding: 12px 0;
+          gap: 8px;
+          border-right: 1px solid var(--mma-border);
           z-index: 1000;
         }
 
         .sidebar-btn {
-          width: 32px;
-          height: 32px;
-          border: 1px solid var(--color-white);
-          border-radius: 0;
+          width: 30px;
+          height: 30px;
+          border: 1px solid var(--mma-border);
+          border-radius: 8px;
           background: transparent;
-          color: var(--color-white);
-          font-size: 1.2rem;
+          color: var(--mma-text-muted);
+          font-size: 16px;
           font-weight: 300;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: none;
+          transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
         }
 
         .sidebar-btn:hover {
-          background: var(--color-white);
-          color: var(--color-black);
+          background: var(--mma-surface-soft);
+          color: var(--mma-text-primary);
+          border-color: var(--mma-surface-hover);
         }
 
         .sidebar-btn.add {
@@ -391,67 +1968,63 @@ export class IIIFInterimAnnotator extends HTMLElement {
         }
 
         .panel-item {
-          width: 32px;
-          height: 32px;
-          border: 1px solid var(--color-white);
-          border-radius: 0;
+          width: 30px;
+          height: 30px;
+          border: 1px solid var(--mma-border);
+          border-radius: 8px;
           background: transparent;
-          color: var(--color-white);
+          color: var(--mma-text-muted);
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 0.7rem;
+          font-size: 11px;
           font-weight: 400;
           cursor: pointer;
-          transition: none;
+          transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
           position: relative;
         }
 
         .panel-item svg {
-          width: 16px;
-          height: 16px;
-          stroke: var(--color-white);
+          width: 14px;
+          height: 14px;
+          stroke: var(--mma-text-muted);
         }
 
         .panel-item:hover {
-          background: var(--color-white);
-          color: var(--color-black);
+          background: var(--mma-surface-soft);
+          color: var(--mma-text-primary);
+          border-color: var(--mma-surface-hover);
         }
 
-        .panel-item:hover svg {
-          stroke: var(--color-black);
-        }
+        .panel-item:hover svg { stroke: var(--mma-text-primary); }
 
         .panel-item.active {
-          background: var(--color-white);
-          color: var(--color-black);
+          background: var(--mma-surface-soft);
+          color: var(--mma-text-primary);
+          border-color: var(--mma-accent-ring);
         }
 
-        .panel-item.active svg {
-          stroke: var(--color-black);
-        }
+        .panel-item.active svg { stroke: var(--mma-accent); }
 
         .panel-item .remove-btn {
           position: absolute;
-          top: -4px;
-          right: -4px;
-          width: 12px;
-          height: 12px;
-          border: 1px solid var(--color-black);
-          border-radius: 0;
-          background: var(--color-white);
-          color: var(--color-black);
-          font-size: 0.6rem;
+          top: -5px;
+          right: -5px;
+          width: 14px;
+          height: 14px;
+          border: 1px solid var(--mma-border);
+          border-radius: 50%;
+          background: var(--mma-bg-elevated);
+          color: var(--mma-text-faint);
+          font-size: 10px;
           display: none;
           align-items: center;
           justify-content: center;
           cursor: pointer;
           line-height: 1;
         }
-
-        .panel-item:hover .remove-btn {
-          display: flex;
-        }
+        .panel-item:hover .remove-btn { display: flex; }
+        .panel-item .remove-btn:hover { color: var(--mma-text-primary); background: var(--mma-surface-hover); }
 
         .container {
           display: flex;
@@ -465,15 +2038,15 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
         .panels-area {
           display: flex;
-          gap: 0;
+          gap: 1px;
           flex: 1;
-          padding-bottom: 40px;
+          padding-bottom: 46px;
+          background: var(--mma-border);
         }
 
         .panel {
           flex: 1;
-          background: var(--color-white);
-          border-right: 1px solid var(--color-gray-200);
+          background: var(--mma-bg-base);
           border-radius: 0;
           box-shadow: none;
           overflow: hidden;
@@ -485,64 +2058,72 @@ export class IIIFInterimAnnotator extends HTMLElement {
           z-index: 1;
         }
 
-        .panel:last-child {
-          border-right: none;
-        }
-
         .panel-header {
-          padding: calc(var(--spacing-unit) * 1.5);
-          border-bottom: 1px solid var(--color-gray-200);
-          font-weight: 400;
-          font-size: 0.9rem;
-          background: var(--color-white);
+          padding: 14px 18px 10px;
+          border-bottom: 1px solid var(--mma-border-soft);
+          background: var(--mma-bg-base);
+          color: var(--mma-text-primary);
           display: flex;
           justify-content: space-between;
-          align-items: center;
+          align-items: flex-start;
           cursor: grab;
           user-select: none;
-          transition: none;
         }
 
-        .panel-header:active {
-          cursor: grabbing;
-        }
-
-        .panel-header:hover {
-          background: var(--color-gray-100);
-        }
+        .panel-header:active { cursor: grabbing; }
+        .panel-header:hover  { background: var(--mma-bg-base); }
 
         .panel-header .panel-title {
           flex: 1;
           pointer-events: none;
           display: flex;
           align-items: center;
-          gap: calc(var(--spacing-unit) * 1);
+          gap: 9px;
+          font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+          font-size: 10px;
+          font-weight: 500;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: var(--mma-text-label);
         }
 
-        .panel-header .panel-title svg {
-          flex-shrink: 0;
+        .panel-header .panel-title::before {
+          content: '';
+          display: inline-block;
+          width: 5px;
+          height: 14px;
+          border-radius: 1px;
+          background: var(--mma-text-faint); /* default for unknown panel types */
         }
+
+        .panel-header .panel-title.panel-type-text::before      { background: var(--mma-panel-text); }
+        .panel-header .panel-title.panel-type-facsimile::before { background: var(--mma-panel-facsimile); }
+        .panel-header .panel-title.panel-type-image::before     { background: var(--mma-panel-image); }
+
+        /* Old SVG icon inside the title is hidden in v2 — the coloured
+           bar is the only signature. We still render the SVG for
+           accessibility / fallback but it doesn't take visual space. */
+        .panel-header .panel-title svg { display: none; }
 
         .panel-header .close-panel {
-          width: 20px;
-          height: 20px;
-          border: 1px solid var(--color-gray-300);
+          width: 22px;
+          height: 22px;
+          border: none;
           background: transparent;
-          color: var(--color-gray-700);
-          font-size: 1.2rem;
+          color: var(--mma-text-faint);
+          font-size: 16px;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          border-radius: 0;
+          border-radius: 5px;
           pointer-events: auto;
-          transition: none;
+          transition: background 0.12s ease, color 0.12s ease;
         }
 
         .panel-header .close-panel:hover {
-          background: var(--color-black);
-          color: var(--color-white);
-          border-color: var(--color-black);
+          background: var(--mma-surface-hover);
+          color: var(--mma-text-primary);
         }
 
         .panel.dragging {
@@ -563,65 +2144,82 @@ export class IIIFInterimAnnotator extends HTMLElement {
           bottom: 0;
           left: 48px;
           right: 0;
-          background: var(--color-white);
-          padding: calc(var(--spacing-unit) * 1.5) calc(var(--spacing-unit) * 2);
-          border-top: 1px solid var(--color-gray-200);
-          box-shadow: none;
+          background: var(--mma-bg-elevated);
+          padding: 9px 16px;
+          border-top: 1px solid var(--mma-border);
           display: flex;
-          gap: calc(var(--spacing-unit) * 1.5);
+          gap: 8px;
           align-items: center;
           z-index: 999;
         }
 
+        /* Pill-shaped export buttons with labels — distinguishable at a
+           glance from the icon-only utility buttons elsewhere in the UI.
+           Labels in JetBrains Mono per the v3 typography spec
+           (technical metadata = mono). */
         .toolbar button {
-          width: 32px;
-          height: 32px;
-          padding: 0;
-          border: 1px solid var(--color-black);
-          border-radius: 0;
-          background: var(--color-black);
+          height: 30px;
+          padding: 0 14px;
+          border: 1px solid var(--mma-border);
+          border-radius: 999px;
+          background: var(--mma-surface-soft);
+          color: var(--mma-text-muted);
           cursor: pointer;
-          display: flex;
+          display: inline-flex;
           align-items: center;
-          justify-content: center;
-          transition: none;
+          gap: 7px;
+          font-family: var(--mma-font-mono);
+          font-size: 11.5px;
+          font-weight: 500;
+          letter-spacing: 0.01em;
+          transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, filter 0.15s ease;
         }
 
         .toolbar button svg {
-          width: 18px;
-          height: 18px;
-          stroke: var(--color-white);
+          width: 14px;
+          height: 14px;
+          stroke: currentColor;
           fill: none;
-          stroke-width: 1.5;
+          stroke-width: 1.7;
+          stroke-linecap: round;
+          stroke-linejoin: round;
         }
 
         .toolbar button:hover {
-          background: var(--color-white);
-          border-color: var(--color-black);
+          background: var(--mma-surface-hover);
+          color: var(--mma-text-primary);
+          border-color: var(--mma-surface-hover);
         }
 
-        .toolbar button:hover svg {
-          stroke: var(--color-black);
+        /* Primary export — accent fill, contrast ink. The GEKO export is
+           the canonical poster artefact; the flat export sits next to it.
+           Hover via brightness filter so the rule works in both themes. */
+        .toolbar button#export-btn {
+          background: var(--mma-accent);
+          color: var(--mma-accent-ink);
+          border-color: var(--mma-accent);
+        }
+        .toolbar button#export-btn:hover {
+          background: var(--mma-accent);
+          color: var(--mma-accent-ink);
+          border-color: var(--mma-accent);
+          filter: brightness(1.08);
         }
 
         .toolbar button:disabled {
-          background: var(--color-gray-300);
-          border-color: var(--color-gray-300);
+          background: var(--mma-surface-soft);
           cursor: not-allowed;
-        }
-
-        .toolbar button:disabled svg {
-          stroke: var(--color-gray-700);
+          opacity: 0.45;
         }
 
         .status {
-          color: var(--color-gray-700);
-          font-size: 0.8rem;
+          color: var(--mma-text-muted);
+          font-size: 11.5px;
           margin-left: auto;
         }
 
         .copyright {
-          color: var(--color-gray-700);
+          color: var(--mma-text-faint);
           font-size: 0.7rem;
           margin-left: calc(var(--spacing-unit) * 2);
         }
@@ -661,22 +2259,15 @@ export class IIIFInterimAnnotator extends HTMLElement {
           opacity: 0.8;
         }
 
-        .connection-line.denotation {
-          stroke: #2196F3;
-        }
-
-        .connection-line.dynamisation {
-          stroke: #FF5722;
-        }
-
-        .connection-line.integration {
-          stroke: #9C27B0;
-        }
-
+        .connection-line.denotation   { stroke: var(--mma-mod-denotation); }
+        .connection-line.dynamisation { stroke: var(--mma-mod-dynamization); }
+        .connection-line.integration  { stroke: var(--mma-mod-integration); }
         .connection-line.transcription {
-          stroke: #4CAF50;
+          stroke: var(--mma-mod-dynamization);
           stroke-dasharray: 4,4;
         }
+        /* Drag-time preview connection — follows the active accent. */
+        .connection-line.dragging { stroke: var(--mma-accent); }
 
         /* Invisible wider stroke for easier clicking */
         .connection-hit-area {
@@ -713,21 +2304,10 @@ export class IIIFInterimAnnotator extends HTMLElement {
           opacity: 0.9;
         }
 
-        .connection-indicator.denotation {
-          fill: #2196F3;
-        }
-
-        .connection-indicator.dynamisation {
-          fill: #FF5722;
-        }
-
-        .connection-indicator.integration {
-          fill: #9C27B0;
-        }
-
-        .connection-indicator.transcription {
-          fill: #4CAF50;
-        }
+        .connection-indicator.denotation    { fill: var(--mma-modality-denotation); }
+        .connection-indicator.dynamisation  { fill: var(--mma-modality-dynamization); }
+        .connection-indicator.integration   { fill: var(--mma-modality-integration); }
+        .connection-indicator.transcription { fill: var(--mma-modality-dynamization); }
 
         /* Larger invisible hit area for indicators */
         .connection-indicator-hitarea {
@@ -763,41 +2343,18 @@ export class IIIFInterimAnnotator extends HTMLElement {
           pointer-events: all;
         }
 
-        .radial-menu-item.denotation {
-          stroke: #2196F3;
-        }
-
-        .radial-menu-item.dynamisation {
-          stroke: #FF5722;
-        }
-
-        .radial-menu-item.integration {
-          stroke: #9C27B0;
-        }
-
-        .radial-menu-item.transcription {
-          stroke: #4CAF50;
-        }
+        .radial-menu-item.denotation    { stroke: var(--mma-modality-denotation); }
+        .radial-menu-item.dynamisation  { stroke: var(--mma-modality-dynamization); }
+        .radial-menu-item.integration   { stroke: var(--mma-modality-integration); }
+        .radial-menu-item.transcription { stroke: var(--mma-modality-dynamization); }
 
         .radial-menu-item:hover {
           transform: scale(1.3);
-          fill: currentColor;
         }
-
-        .radial-menu-item.denotation:hover {
-          fill: #2196F3;
-        }
-
-        .radial-menu-item.dynamisation:hover {
-          fill: #FF5722;
-        }
-
-        .radial-menu-item.integration:hover {
-          fill: #9C27B0;
-        }
-
-        .radial-menu-item.transcription:hover {
-          fill: #4CAF50;
+        .radial-menu-item.denotation:hover    { fill: var(--mma-modality-denotation); }
+        .radial-menu-item.dynamisation:hover  { fill: var(--mma-modality-dynamization); }
+        .radial-menu-item.integration:hover   { fill: var(--mma-modality-integration); }
+        .radial-menu-item.transcription:hover { fill: var(--mma-modality-dynamization);
         }
 
         .radial-menu-label {
@@ -818,106 +2375,153 @@ export class IIIFInterimAnnotator extends HTMLElement {
           pointer-events: none;
         }
 
+        /* ── Modal pattern (v2 uniform) ─────────────────────────────
+           All modals share a container, header (Spectral title + X
+           close), body (padding 14-18). Open/close via .active class.
+           Backdrop click + Esc are wired in setupEventListeners. */
+        .mma-modal {
+          background: var(--mma-bg-elevated);
+          border: 1px solid var(--mma-border);
+          border-radius: 12px;
+          box-shadow: 0 18px 48px rgba(0,0,0,0.45);
+          color: var(--mma-text-primary);
+          font-family: var(--mma-font-sans);
+          min-width: 340px;
+          max-width: 420px;
+          z-index: 10001;
+        }
+        .mma-modal-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 14px 16px 12px;
+          border-bottom: 1px solid var(--mma-border-soft);
+        }
+        .mma-modal-title {
+          font-family: var(--mma-font-sans);
+          font-size: 15px;
+          font-weight: 500;
+          color: var(--mma-text-primary);
+        }
+        .mma-modal-close {
+          width: 26px;
+          height: 26px;
+          border: 1px solid var(--mma-border);
+          border-radius: 50%;
+          background: transparent;
+          color: var(--mma-text-faint);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+          transition: background 0.15s ease, color 0.15s ease;
+        }
+        .mma-modal-close:hover {
+          background: var(--mma-surface-soft);
+          color: var(--mma-text-primary);
+        }
+        .mma-modal-close svg {
+          width: 12px;
+          height: 12px;
+          stroke: currentColor;
+          fill: none;
+          stroke-width: 1.8;
+          stroke-linecap: round;
+        }
+        .mma-modal-body {
+          padding: 16px;
+        }
+
         .modality-selector {
           position: fixed;
-          background: var(--color-white);
-          border: 1px solid var(--color-black);
-          border-radius: 0;
-          padding: calc(var(--spacing-unit) * 2);
-          box-shadow: none;
-          z-index: 10000;
+          z-index: 10001;
           display: none;
+          background: var(--mma-bg-elevated);
+          border: 1px solid var(--mma-border);
+          border-radius: 12px;
+          box-shadow: 0 18px 48px rgba(0,0,0,0.45);
+          min-width: 280px;
+          overflow: hidden;
         }
 
-        .modality-selector.active {
-          display: block;
-        }
-
-        .modality-selector h3 {
-          margin: 0 0 calc(var(--spacing-unit) * 1.5) 0;
-          font-size: 0.85rem;
-          font-weight: 400;
-        }
+        .modality-selector.active { display: block; }
 
         .modality-buttons {
           display: flex;
-          gap: calc(var(--spacing-unit) * 1);
           flex-direction: column;
+          gap: 0;
         }
 
+        /* Modality options as rows with a coloured dot + sans label */
         .modality-btn {
-          padding: calc(var(--spacing-unit) * 1.5) calc(var(--spacing-unit) * 2);
-          border: 1px solid;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 11px 16px;
+          border: none;
+          border-top: 1px solid var(--mma-border-soft);
           border-radius: 0;
+          background: transparent;
+          color: var(--mma-text-primary);
           cursor: pointer;
-          font-weight: 400;
-          font-size: 0.85rem;
-          transition: none;
           text-align: left;
+          font-family: var(--mma-font-sans);
+          font-size: 13px;
+          font-weight: 500;
+          letter-spacing: 0;
+          transition: background 0.12s ease;
+        }
+        .modality-btn:first-child { border-top: none; }
+
+        .modality-btn::before {
+          content: '';
+          width: 9px;
+          height: 9px;
+          border-radius: 50%;
+          flex-shrink: 0;
+          background: var(--mma-text-faint);
         }
 
-        .modality-btn:hover {
-          transform: none;
+        .modality-btn small {
+          display: block;
+          font-size: 10.5px;
+          font-weight: 400;
+          color: var(--mma-text-faint);
+          margin-top: 1px;
         }
 
-        .modality-btn.denotation {
-          background: var(--color-white);
-          border-color: #2196F3;
-          color: #2196F3;
+        .modality-btn strong {
+          display: block;
+          font-weight: 500;
         }
 
-        .modality-btn.denotation:hover {
-          background: #2196F3;
-          color: var(--color-white);
-        }
+        .modality-btn:hover { background: var(--mma-surface-soft); }
 
-        .modality-btn.dynamisation {
-          background: var(--color-white);
-          border-color: #FF5722;
-          color: #FF5722;
-        }
-
-        .modality-btn.dynamisation:hover {
-          background: #FF5722;
-          color: var(--color-white);
-        }
-
-        .modality-btn.integration {
-          background: var(--color-white);
-          border-color: #9C27B0;
-          color: #9C27B0;
-        }
-
-        .modality-btn.integration:hover {
-          background: #9C27B0;
-          color: var(--color-white);
-        }
+        .modality-btn.denotation::before    { background: var(--mma-modality-denotation); }
+        .modality-btn.dynamisation::before  { background: var(--mma-modality-dynamization); }
+        .modality-btn.integration::before   { background: var(--mma-modality-integration); }
 
         .add-panel-modal {
           position: fixed;
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          background: var(--color-white);
-          border: 1px solid var(--color-black);
-          border-radius: 0;
-          padding: calc(var(--spacing-unit) * 3);
-          box-shadow: none;
+          background: var(--mma-bg-elevated);
+          border: 1px solid var(--mma-border);
+          border-radius: 12px;
+          box-shadow: 0 18px 48px rgba(0,0,0,0.45);
+          padding: 0;
           z-index: 10001;
           display: none;
-          min-width: 300px;
+          min-width: 360px;
+          max-width: 420px;
+          overflow: hidden;
         }
 
-        .add-panel-modal.active {
-          display: block;
-        }
+        .add-panel-modal.active { display: block; }
 
-        .add-panel-modal h3 {
-          margin: 0 0 calc(var(--spacing-unit) * 2) 0;
-          font-size: 1rem;
-          font-weight: 400;
-          color: var(--color-black);
-        }
+        .add-panel-modal h3 { display: none; } /* replaced by .mma-modal-header */
 
         .panel-type-buttons {
           display: flex;
@@ -926,49 +2530,39 @@ export class IIIFInterimAnnotator extends HTMLElement {
         }
 
         .panel-type-btn {
-          padding: calc(var(--spacing-unit) * 1.5);
-          border: 1px solid var(--color-gray-300);
-          border-radius: 0;
-          background: var(--color-white);
+          padding: 14px 16px;
+          border: 1px solid var(--mma-border);
+          border-radius: 10px;
+          background: var(--mma-bg-base);
           cursor: pointer;
-          transition: none;
+          transition: background 0.15s ease, border-color 0.15s ease;
           text-align: left;
           display: flex;
           align-items: center;
-          gap: calc(var(--spacing-unit) * 1.5);
+          gap: 14px;
+          color: var(--mma-text-primary);
         }
 
-        .panel-type-btn .icon {
-          flex-shrink: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .panel-type-btn .icon svg {
-          width: 20px;
-          height: 20px;
-        }
-
-        .panel-type-btn .label {
-          flex: 1;
-        }
+        .panel-type-btn .icon { display: none; } /* removed in v2 — coloured signature lives on the panel-header bar instead */
+        .panel-type-btn .label { flex: 1; }
 
         .panel-type-btn:hover {
-          border-color: var(--color-black);
-          background: var(--color-gray-100);
+          border-color: var(--mma-accent-ring);
+          background: var(--mma-surface-soft);
         }
 
         .panel-type-btn strong {
           display: block;
-          color: var(--color-black);
-          font-weight: 400;
-          margin-bottom: calc(var(--spacing-unit) * 0.5);
+          color: var(--mma-text-primary);
+          font-family: 'Spectral', Georgia, serif;
+          font-size: 14px;
+          font-weight: 500;
+          margin-bottom: 2px;
         }
 
         .panel-type-btn small {
-          color: var(--color-gray-700);
-          font-size: 0.8rem;
+          color: var(--mma-text-faint);
+          font-size: 11.5px;
         }
 
         .modal-overlay {
@@ -977,93 +2571,93 @@ export class IIIFInterimAnnotator extends HTMLElement {
           left: 0;
           width: 100vw;
           height: 100vh;
-          background: rgba(0, 0, 0, 0.4);
+          background: var(--mma-backdrop);
           z-index: 10000;
           display: none;
         }
 
-        .modal-overlay.active {
-          display: block;
-        }
+        .modal-overlay.active { display: block; }
 
         .connection-menu {
           position: fixed;
-          background: var(--color-white);
-          border: 1px solid var(--color-black);
-          border-radius: 0;
+          background: var(--mma-bg-elevated);
+          border: 1px solid var(--mma-border);
+          border-radius: 10px;
           padding: 0;
-          box-shadow: none;
+          box-shadow: 0 18px 48px rgba(0,0,0,0.45);
           z-index: 10001;
           display: none;
-          min-width: 150px;
+          min-width: 180px;
+          overflow: hidden;
         }
 
-        .connection-menu.active {
-          display: block;
-        }
+        .connection-menu.active { display: block; }
 
         .connection-menu-item {
-          padding: calc(var(--spacing-unit) * 1) calc(var(--spacing-unit) * 1.5);
+          padding: 10px 14px;
           border: none;
-          background: var(--color-white);
+          background: transparent;
           width: 100%;
           text-align: left;
           cursor: pointer;
-          font-size: 0.85rem;
-          transition: none;
-          border-bottom: 1px solid var(--color-gray-200);
+          color: var(--mma-text-primary);
+          font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+          font-size: 12.5px;
+          transition: background 0.12s ease;
+          border-top: 1px solid var(--mma-border-soft);
         }
 
-        .connection-menu-item:last-child {
-          border-bottom: none;
-        }
+        .connection-menu-item:first-child { border-top: none; }
+        .connection-menu-item:hover { background: var(--mma-surface-soft); }
 
-        .connection-menu-item:hover {
-          background: var(--color-gray-100);
-        }
-
-        .connection-menu-item.danger {
-          color: #d32f2f;
-        }
-
-        .connection-menu-item.danger:hover {
-          background: #ffebee;
-        }
+        .connection-menu-item.danger { color: #d77a72; }
+        .connection-menu-item.danger:hover { background: rgba(215, 122, 114, 0.10); }
 
         .about-modal {
           position: fixed;
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          background: var(--color-white);
-          border: 1px solid var(--color-black);
-          border-radius: 0;
-          padding: calc(var(--spacing-unit) * 4);
-          box-shadow: none;
+          background: var(--mma-bg-elevated);
+          border: 1px solid var(--mma-border);
+          border-radius: 12px;
+          padding: 22px 26px 26px;
+          box-shadow: 0 18px 48px rgba(0,0,0,0.45);
           z-index: 10002;
           display: none;
           max-width: 600px;
           max-height: 80vh;
           overflow-y: auto;
+          color: var(--mma-text-primary);
         }
 
-        .about-modal.active {
-          display: block;
-        }
+        .about-modal.active { display: block; }
 
         .about-modal h2 {
-          margin: 0 0 calc(var(--spacing-unit) * 2) 0;
-          font-size: 1.5rem;
-          font-weight: 400;
-          letter-spacing: 0.05em;
-          text-transform: uppercase;
+          margin: 0 0 12px 0;
+          font-family: var(--mma-font-mono);
+          font-size: 18px;
+          font-weight: 500;
+          letter-spacing: -0.01em;
+          text-transform: none;
+          color: var(--mma-text-primary);
         }
 
         .about-modal h3 {
-          margin: calc(var(--spacing-unit) * 3) 0 calc(var(--spacing-unit) * 1) 0;
-          font-size: 1rem;
-          font-weight: 400;
-          color: var(--color-gray-700);
+          margin: 22px 0 8px 0;
+          font-family: var(--mma-font-sans);
+          font-size: 12px;
+          font-weight: 500;
+          color: var(--mma-text-label);
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+        }
+
+        .about-modal p,
+        .about-modal li {
+          color: var(--mma-text-body);
+          font-size: 13px;
+          line-height: 1.55;
         }
 
         .about-modal p {
@@ -1084,175 +2678,183 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
         .about-modal .close-btn {
           position: absolute;
-          top: calc(var(--spacing-unit) * 2);
-          right: calc(var(--spacing-unit) * 2);
-          width: 32px;
-          height: 32px;
-          border: 1px solid var(--color-black);
+          top: 16px;
+          right: 16px;
+          width: 26px;
+          height: 26px;
+          border: 1px solid var(--mma-border);
           background: transparent;
-          font-size: 1.2rem;
+          color: var(--mma-text-faint);
+          font-size: 14px;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          border-radius: 0;
+          border-radius: 50%;
+          transition: background 0.15s ease, color 0.15s ease;
+          line-height: 1;
         }
 
         .about-modal .close-btn:hover {
-          background: var(--color-black);
-          color: var(--color-white);
+          background: var(--mma-surface-soft);
+          color: var(--mma-text-primary);
         }
 
         .color-legend {
           display: flex;
-          gap: calc(var(--spacing-unit) * 2);
+          gap: 18px;
           flex-wrap: wrap;
-          margin: calc(var(--spacing-unit) * 2) 0;
+          margin: 14px 0;
         }
 
         .color-item {
           display: flex;
           align-items: center;
-          gap: calc(var(--spacing-unit) * 1);
+          gap: 8px;
+          color: var(--mma-text-body);
+          font-size: 12.5px;
         }
 
         .color-box {
-          width: 32px;
-          height: 16px;
-          border: 1px solid var(--color-gray-300);
+          width: 22px;
+          height: 10px;
+          border-radius: 2px;
         }
 
-        .color-box.denotation {
-          background: #2196F3;
-        }
-
-        .color-box.dynamisation {
-          background: #FF5722;
-        }
-
-        .color-box.integration {
-          background: #9C27B0;
-        }
-
-        .color-box.transcription {
-          background: #4CAF50;
-        }
+        .color-box.denotation    { background: var(--mma-modality-denotation); }
+        .color-box.dynamisation  { background: var(--mma-modality-dynamization); }
+        .color-box.integration   { background: var(--mma-modality-integration); }
+        .color-box.transcription { background: var(--mma-modality-dynamization); }
 
         /* Global annotation sidebar */
         .annotation-sidebar {
           position: fixed;
           top: 0;
           right: 0;
-          width: 400px;
+          width: 380px;
           height: 100vh;
-          background: var(--color-white);
-          border-left: 2px solid var(--color-black);
+          background: var(--mma-bg-elevated);
+          border-left: 1px solid var(--mma-border);
           z-index: 100000;
           transform: translateX(100%);
-          transition: transform 0.3s ease;
+          transition: transform 0.28s ease;
           display: flex;
           flex-direction: column;
-          box-shadow: -4px 0 8px rgba(0,0,0,0.1);
+          color: var(--mma-text-primary);
         }
 
-        .annotation-sidebar.visible {
-          transform: translateX(0);
-        }
+        .annotation-sidebar.visible { transform: translateX(0); }
 
         .annotation-sidebar-header {
-          padding: calc(var(--spacing-unit) * 2);
-          border-bottom: 1px solid var(--color-gray-200);
+          padding: 14px 16px 12px;
+          border-bottom: 1px solid var(--mma-border-soft);
           display: flex;
           justify-content: space-between;
           align-items: center;
-          font-weight: 600;
-          font-size: 1rem;
+          font-family: 'Spectral', Georgia, serif;
+          font-weight: 500;
+          font-size: 15px;
+          color: var(--mma-text-primary);
         }
 
         .annotation-sidebar-close {
-          width: 28px;
-          height: 28px;
-          border: 1px solid var(--color-black);
-          background: var(--color-white);
+          width: 26px;
+          height: 26px;
+          border: 1px solid var(--mma-border);
+          border-radius: 50%;
+          background: transparent;
+          color: var(--mma-text-faint);
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
           padding: 0;
-          transition: all 0.2s ease;
+          transition: background 0.15s ease, color 0.15s ease;
         }
 
         .annotation-sidebar-close svg {
-          width: 16px;
-          height: 16px;
-          stroke: var(--color-black);
+          width: 12px;
+          height: 12px;
+          stroke: currentColor;
           fill: none;
-          stroke-width: 1.5;
+          stroke-width: 1.8;
+          stroke-linecap: round;
         }
 
         .annotation-sidebar-close:hover {
-          background: var(--color-black);
-        }
-
-        .annotation-sidebar-close:hover svg {
-          stroke: var(--color-white);
+          background: var(--mma-surface-soft);
+          color: var(--mma-text-primary);
         }
 
         .annotation-sidebar-content {
           flex: 1;
-          padding: calc(var(--spacing-unit) * 2);
+          padding: 16px;
           overflow-y: auto;
         }
 
         .annotation-sidebar-content textarea {
           width: 100%;
-          min-height: 200px;
-          border: 1px solid var(--color-gray-200);
-          padding: calc(var(--spacing-unit) * 1.5);
+          min-height: 180px;
+          border: 1px solid var(--mma-border);
+          border-radius: 8px;
+          padding: 10px 12px;
           font-family: inherit;
-          font-size: 1rem;
+          font-size: 13px;
+          background: var(--mma-bg-base);
+          color: var(--mma-text-body);
           resize: vertical;
           line-height: 1.5;
           box-sizing: border-box;
         }
 
+        .annotation-sidebar-content textarea:focus {
+          outline: none;
+          border-color: var(--mma-accent-ring);
+        }
+
         .annotation-sidebar-content p {
-          margin: 0 0 calc(var(--spacing-unit) * 1) 0;
-          line-height: 1.6;
+          margin: 0 0 8px 0;
+          line-height: 1.55;
+          color: var(--mma-text-body);
+          font-size: 13px;
         }
 
         .annotation-sidebar-buttons {
-          padding: calc(var(--spacing-unit) * 2);
-          border-top: 1px solid var(--color-gray-200);
+          padding: 14px 16px;
+          border-top: 1px solid var(--mma-border-soft);
           display: flex;
-          gap: calc(var(--spacing-unit) * 1);
+          gap: 8px;
           justify-content: flex-end;
         }
 
         .annotation-sidebar button {
-          padding: calc(var(--spacing-unit) * 1.25) calc(var(--spacing-unit) * 2);
-          border: 1px solid var(--color-black);
-          background: var(--color-white);
+          height: 30px;
+          padding: 0 14px;
+          border: 1px solid var(--mma-border);
+          border-radius: 999px;
+          background: var(--mma-surface-soft);
+          color: var(--mma-text-primary);
           cursor: pointer;
           font-family: inherit;
-          font-size: 0.9rem;
-          transition: all 0.2s ease;
+          font-size: 12px;
+          font-weight: 500;
+          letter-spacing: 0.02em;
+          transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
         }
 
         .annotation-sidebar button:hover {
-          background: var(--color-black);
-          color: var(--color-white);
+          background: var(--mma-surface-hover);
         }
 
         .annotation-sidebar button.delete-btn {
-          background: #f44336;
-          border-color: #f44336;
-          color: var(--color-white);
+          background: transparent;
+          border-color: rgba(215, 122, 114, 0.45);
+          color: #d77a72;
         }
 
         .annotation-sidebar button.delete-btn:hover {
-          background: #d32f2f;
-          border-color: #d32f2f;
+          background: rgba(215, 122, 114, 0.12);
+          border-color: rgba(215, 122, 114, 0.75);
         }
 
         /* Sidebar backdrop */
@@ -1262,11 +2864,11 @@ export class IIIFInterimAnnotator extends HTMLElement {
           left: 0;
           width: 100%;
           height: 100vh;
-          background: rgba(0, 0, 0, 0.3);
+          background: rgba(0, 0, 0, 0.5);
           z-index: 99999;
           opacity: 0;
           pointer-events: none;
-          transition: opacity 0.3s ease;
+          transition: opacity 0.28s ease;
         }
 
         .sidebar-backdrop.visible {
@@ -1276,9 +2878,33 @@ export class IIIFInterimAnnotator extends HTMLElement {
       </style>
 
       <header class="app-header">
-        <div class="app-title">IIIF INTERIM Annotator</div>
-        <button class="app-info-btn" id="app-info-btn" title="About this project">?</button>
+        <div class="app-title-group">
+          <span class="app-title">${APP_TITLE}</span>
+          <span class="app-title-divider" aria-hidden="true"></span>
+          <span class="app-subtitle">${APP_SUBTITLE}</span>
+        </div>
+        <div class="app-header-actions">
+          <span class="profile-badge" id="profile-badge" title="Active annotation profile">interim-geko</span>
+          <button class="app-icon-btn" id="theme-toggle-btn" title="Switch theme" aria-label="Switch to light theme">
+            <!-- Icon swapped at runtime by _applyTheme(); sun in dark mode = "go to light". -->
+            <svg class="theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4"/>
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+            </svg>
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true" style="display:none;">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/>
+            </svg>
+          </button>
+          <button class="app-icon-btn app-info-btn" id="app-info-btn" title="About this project" aria-label="About">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          </button>
+        </div>
       </header>
+
+      <nav class="tab-strip" role="tablist" aria-label="Workspace tabs">
+        <button class="tab active" id="tab-annotate" role="tab" aria-selected="true" aria-controls="view-annotate" data-tab="annotate">Annotate</button>
+        <button class="tab" id="tab-query" role="tab" aria-selected="false" aria-controls="view-query" data-tab="query">Query &amp; Analytics</button>
+      </nav>
 
       <div class="main-wrapper">
         <div class="sidebar">
@@ -1294,73 +2920,86 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
       <div class="toolbar">
         <button id="export-btn" title="Export annotations (flat JSON-LD)">
-          <svg viewBox="0 0 24 24">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-          </svg>
+          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          <span>Export</span>
         </button>
-        <button id="export-geko-btn" title="Export as GEKO Ekphrasis collection (3-level: Collection → Ekphrasis-per-page → Annotation)">
-          <svg viewBox="0 0 24 24">
-            <path d="M3 7h18M3 12h18M3 17h12M19 17l3-3M19 17l3 3"/>
-          </svg>
+        <button id="export-geko-btn" title="Export as GEKO Ekphrasis collection (Collection → Ekphrasis-per-page → Annotation)">
+          <svg viewBox="0 0 24 24"><path d="M3 7h18M3 12h18M3 17h12M19 17l3-3M19 17l3 3"/></svg>
+          <span>GEKO</span>
         </button>
-        <span class="status" id="status">Ready - Select and confirm text/image, then drag to link</span>
+        <span class="status" id="status">Ready — Select and confirm text/image, then drag to link</span>
         <span class="copyright">© 2026 Carlo Teo Pedretti</span>
       </div>
 
-      <div class="modality-selector" id="modality-selector">
-        <h3>Select Ekphrastic Modality:</h3>
+      <div class="modality-selector" id="modality-selector" role="dialog" aria-modal="true" aria-labelledby="modality-selector-title">
+        <div class="mma-modal-header">
+          <span class="mma-modal-title" id="modality-selector-title">Select ekphrastic modality</span>
+          <button class="mma-modal-close" id="modality-selector-close" aria-label="Close">
+            <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
         <div class="modality-buttons">
           <button class="modality-btn denotation" data-modality="denotation">
-            <strong>Denotation</strong><br>
-            <small>geko:denotation - Direct reference</small>
+            <span>
+              <strong>Denotation</strong>
+              <small>Direct referential link</small>
+            </span>
           </button>
           <button class="modality-btn dynamisation" data-modality="dynamisation">
-            <strong>Dynamisation</strong><br>
-            <small>geko:dynamisation - Movement/temporal</small>
+            <span>
+              <strong>Dynamization</strong>
+              <small>Movement / temporal</small>
+            </span>
           </button>
           <button class="modality-btn integration" data-modality="integration">
-            <strong>Integration</strong><br>
-            <small>geko:integration - Interpretive blend</small>
+            <span>
+              <strong>Integration</strong>
+              <small>Interpretive blend</small>
+            </span>
           </button>
         </div>
       </div>
 
       <div class="modal-overlay" id="modal-overlay"></div>
-      <div class="add-panel-modal" id="add-panel-modal">
-        <h3>Add New Panel</h3>
-        <div class="panel-type-buttons">
-          <button class="panel-type-btn" data-type="text">
-            <span class="icon">${this.getPanelIcon('text')}</span>
-            <span class="label">
-              <strong>Text Panel</strong>
-              <small>For annotating textual content</small>
-            </span>
+      <div class="add-panel-modal" id="add-panel-modal" role="dialog" aria-modal="true" aria-labelledby="add-panel-title">
+        <div class="mma-modal-header">
+          <span class="mma-modal-title" id="add-panel-title">Add new panel</span>
+          <button class="mma-modal-close" id="add-panel-close" aria-label="Close">
+            <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
-          <button class="panel-type-btn" data-type="image">
-            <span class="icon">${this.getPanelIcon('image')}</span>
-            <span class="label">
-              <strong>Image Panel</strong>
-              <small>For IIIF images and paintings</small>
-            </span>
-          </button>
-          <button class="panel-type-btn" data-type="facsimile">
-            <span class="icon">${this.getPanelIcon('facsimile')}</span>
-            <span class="label">
-              <strong>Facsimile Panel</strong>
-              <small>For manuscript facsimiles</small>
-            </span>
-          </button>
+        </div>
+        <div class="mma-modal-body">
+          <div class="panel-type-buttons">
+            <button class="panel-type-btn" data-type="text">
+              <span class="label">
+                <strong>Text panel</strong>
+                <small>Annotate textual content</small>
+              </span>
+            </button>
+            <button class="panel-type-btn" data-type="image">
+              <span class="label">
+                <strong>Image panel</strong>
+                <small>IIIF images, paintings</small>
+              </span>
+            </button>
+            <button class="panel-type-btn" data-type="facsimile">
+              <span class="label">
+                <strong>Facsimile panel</strong>
+                <small>Manuscript facsimiles</small>
+              </span>
+            </button>
+          </div>
         </div>
       </div>
 
-      <div class="connection-menu" id="connection-menu">
-        <button class="connection-menu-item" id="connection-info">View Details</button>
-        <button class="connection-menu-item danger" id="connection-delete">Delete Connection</button>
+      <div class="connection-menu" id="connection-menu" role="menu">
+        <button class="connection-menu-item" id="connection-info" role="menuitem">View details</button>
+        <button class="connection-menu-item danger" id="connection-delete" role="menuitem">Delete connection</button>
       </div>
 
-      <div class="about-modal" id="about-modal">
-        <button class="close-btn" id="close-about-btn">×</button>
-        <h2>IIIF INTERIM Annotator</h2>
+      <div class="about-modal" id="about-modal" role="dialog" aria-modal="true" aria-labelledby="about-modal-title">
+        <button class="close-btn" id="close-about-btn" aria-label="Close">×</button>
+        <h2 id="about-modal-title">${APP_TITLE}</h2>
 
         <p>
           A web-based tool for creating semantic annotations between manuscript transcriptions and artwork images,
@@ -1402,7 +3041,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
           <li><strong>Select text:</strong> Highlight text in the Transcription panel and click "Confirm"</li>
           <li><strong>Select image region:</strong> Enable selection mode and draw a rectangle on the image</li>
           <li><strong>Create connection:</strong> Drag from confirmed text to confirmed image region</li>
-          <li><strong>Choose modality:</strong> Select the ekphrastic relationship type (for Painting panel)</li>
+          <li><strong>Choose modality:</strong> Select the ekphrastic relationship type (for Visual Work panel)</li>
           <li><strong>Manage connections:</strong> Click on connection lines to view details or delete</li>
           <li><strong>Export:</strong> Use the export button to download all annotations as JSON</li>
         </ul>
@@ -1438,6 +3077,15 @@ export class IIIFInterimAnnotator extends HTMLElement {
     appInfoBtn.addEventListener('click', () => this.openAboutModal());
     closeAboutBtn.addEventListener('click', () => this.closeAboutModal());
 
+    // Theme toggle — runs once render() has wired the button into the
+    // shadow tree. _initTheme() already set the attribute pre-render;
+    // we call _setTheme again here just to sync the icon visibility.
+    const themeBtn = this.shadowRoot.getElementById('theme-toggle-btn');
+    if (themeBtn) {
+      this._setTheme(this.getAttribute('data-theme') || 'dark', /* persist */ false);
+      themeBtn.addEventListener('click', () => this._toggleTheme());
+    }
+
     // Add panel button
     addPanelBtn.addEventListener('click', () => this.openAddPanelModal());
 
@@ -1445,6 +3093,51 @@ export class IIIFInterimAnnotator extends HTMLElement {
     modalOverlay.addEventListener('click', () => {
       this.closeAddPanelModal();
       this.closeAboutModal();
+    });
+
+    // Uniform-modal close buttons (v2 — every modal has an X)
+    const addPanelCloseBtn = this.shadowRoot.getElementById('add-panel-close');
+    if (addPanelCloseBtn) {
+      addPanelCloseBtn.addEventListener('click', () => this.closeAddPanelModal());
+    }
+    const modalitySelectorCloseBtn = this.shadowRoot.getElementById('modality-selector-close');
+    if (modalitySelectorCloseBtn) {
+      modalitySelectorCloseBtn.addEventListener('click', () => {
+        const modalitySelector = this.shadowRoot.getElementById('modality-selector');
+        modalitySelector.classList.remove('active');
+        this.pendingConnection = null;
+        this.draggingFrom = null;
+        this.updateStatus('Selection cancelled');
+      });
+    }
+
+    // Esc closes any open modal (about / add-panel / modality selector
+    // / connection menu / global sidebar). Bound at document level so
+    // it works regardless of which surface has focus.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      let handled = false;
+      const aboutEl = this.shadowRoot.getElementById('about-modal');
+      if (aboutEl?.classList.contains('active')) { this.closeAboutModal(); handled = true; }
+      const addPanelEl = this.shadowRoot.getElementById('add-panel-modal');
+      if (addPanelEl?.classList.contains('active')) { this.closeAddPanelModal(); handled = true; }
+      const modalityEl = this.shadowRoot.getElementById('modality-selector');
+      if (modalityEl?.classList.contains('active')) {
+        modalityEl.classList.remove('active');
+        this.pendingConnection = null;
+        this.draggingFrom = null;
+        handled = true;
+      }
+      const connMenuEl = this.shadowRoot.getElementById('connection-menu');
+      if (connMenuEl?.classList.contains('active')) { this.hideConnectionMenu(); handled = true; }
+      const sidebarEl = this.shadowRoot.getElementById('annotation-sidebar');
+      if (sidebarEl?.classList.contains('visible')) {
+        sidebarEl.classList.remove('visible');
+        const backdropEl = this.shadowRoot.getElementById('sidebar-backdrop');
+        backdropEl?.classList.remove('visible');
+        handled = true;
+      }
+      if (handled) e.stopPropagation();
     });
 
     // Panel type selection
@@ -2104,11 +3797,11 @@ export class IIIFInterimAnnotator extends HTMLElement {
     this.draggingFrom = { element, type, panelType };
     element.style.cursor = 'grabbing';
 
-    // Create temporary path
+    // Create temporary path. Class `.dragging` is themed via CSS so
+    // it follows the accent on theme switch (no inline stroke).
     const svg = this.shadowRoot.getElementById('connection-overlay');
     this.tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    this.tempPath.setAttribute('class', 'connection-line');
-    this.tempPath.setAttribute('stroke', '#FFC107');
+    this.tempPath.setAttribute('class', 'connection-line dragging');
     this.tempPath.setAttribute('stroke-width', '3');
     this.tempPath.setAttribute('stroke-dasharray', '5,5');
     svg.appendChild(this.tempPath);
@@ -2820,6 +4513,21 @@ Annotation Details:
     });
   }
 
+  /** Toggle the [MMA pagexml] diagnostic log on every text panel under
+   *  this orchestrator. Invoke from DevTools when investigating
+   *  PAGE-XML / facsimile-anchor regressions:
+   *
+   *    document.querySelector('multimodal-annotator').debugPageXml(true)
+   *    document.querySelector('multimodal-annotator').debugPageXml(false)
+   *
+   *  No-op when no text panel is mounted. Returns the number of panels
+   *  the flag was applied to. */
+  debugPageXml(on = true) {
+    const panels = this.shadowRoot.querySelectorAll('iiif-text-panel');
+    panels.forEach((p) => { p._debugPageXml = !!on; });
+    return panels.length;
+  }
+
   exportAnnotations() {
     // Source of truth is the store cache after T1.5b. Fall back to the
     // in-memory mirror for any pre-store rows or store-not-yet-ready edge.
@@ -2828,7 +4536,7 @@ Annotation Details:
     const annotationList = {
       '@context': 'http://www.w3.org/ns/anno.jsonld',
       type: 'AnnotationCollection',
-      label: 'Multimodal Annotator export',
+      label: `${APP_TITLE} export`,
       created: new Date().toISOString(),
       items,
     };
@@ -2922,7 +4630,7 @@ Annotation Details:
     const collection = {
       '@context': contextUrl,
       type: 'AnnotationCollection',
-      label: 'Multimodal Annotator — GEKO Ekphrases',
+      label: `${APP_TITLE} — GEKO Ekphrases`,
       created: new Date().toISOString(),
       items: ekphrasisItems,
     };
@@ -3092,7 +4800,7 @@ Annotation Details:
 
       // Image panel with Europeana manifest
       this.addPanel('image', {
-        label: 'Painting',
+        label: 'Visual Work',
         manifest: 'https://iiif.europeana.eu/presentation/366/item_7PWBIM2OZFXYT5ZC5Y7IFXBZSNB7TOZ6/manifest'
       });
     }
@@ -3186,7 +4894,7 @@ Annotation Details:
       header.dataset.panelId = panel.id;
 
       const title = document.createElement('span');
-      title.className = 'panel-title';
+      title.className = `panel-title panel-type-${panel.type}`;
       title.innerHTML = `${this.getPanelIcon(panel.type)} ${panel.label}`;
 
       const closeBtn = document.createElement('button');
