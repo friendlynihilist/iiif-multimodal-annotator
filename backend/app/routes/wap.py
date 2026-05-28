@@ -370,8 +370,11 @@ async def create_annotation_anchor(
         raise HTTPException(status_code=404,
                             detail=f"No annotation at {iri} to anchor.")
 
-    # Build the anchor triples in a fresh Graph, then serialize as NT
-    # and INSERT into the annotation's named graph (additive).
+    # Build the anchor triples in a fresh Graph, then serialize as NT.
+    # The SPARQL Update below does DELETE-old + INSERT-new in a single
+    # transaction so re-anchoring is atomic (M5 edit-mode path) and
+    # the annotation never goes through a "no anchor" intermediate
+    # state visible to other readers.
     g = Graph()
     ann      = URIRef(iri)
     anchor   = BNode()
@@ -392,13 +395,24 @@ async def create_annotation_anchor(
             g.add((target, RDFS.label, Literal(anchored_to_label, lang="en")))
 
     # Also stamp dcterms:modified on the annotation to reflect the
-    # edit. dcterms:created on the annotation is preserved because we
-    # never DROP, only INSERT.
+    # edit. dcterms:created is preserved (we never touch it).
     g.add((ann, DCTERMS.modified,
            Literal(provenance.now_iso(), datatype=XSD.dateTime)))
 
-    nt = _serialize_nt(g)
-    await fuseki.insert_graph(iri, nt)
+    nt_new = _serialize_nt(g)
+    # Atomic re-anchor: drop the previous anchor blank node + its
+    # outgoing triples first, then insert the new anchor. Custom
+    # entity triples from a previous round (rdfs:label, rdf:type on
+    # the entity IRI) are intentionally left as orphans: harmless,
+    # and removing them would risk taking down entities still
+    # referenced by sibling annotations in the same graph.
+    update = (
+        f"PREFIX mlao: <{MLAO}>\n"
+        f"DELETE {{ GRAPH <{iri}> {{ <{iri}> mlao:hasAnchor ?a . ?a ?p ?o . }} }}\n"
+        f"WHERE  {{ GRAPH <{iri}> {{ <{iri}> mlao:hasAnchor ?a . OPTIONAL {{ ?a ?p ?o }} }} }};\n"
+        f"INSERT DATA {{ GRAPH <{iri}> {{\n{nt_new}\n}} }}"
+    )
+    await fuseki.sparql_update(update)
 
     # Return the updated annotation, framed as JSON-LD.
     refreshed_nt = await fuseki.construct_graph(iri)

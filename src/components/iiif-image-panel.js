@@ -1741,10 +1741,15 @@ export class IIIFImagePanel extends HTMLElement {
       ? `<p>${escape(confirmed.body)}</p>`
       : `<p>Click delete to remove this annotation.</p>`;
 
+    // Pass the annotation IRI so the orchestrator can look up its
+    // anchor (M5) and render the ⚓ block in the popup.
+    const annotationIri = element.getAttribute?.('data-annotation-iri') || null;
+
     // Emit event to show global sidebar
     this.dispatchEvent(new CustomEvent('show-annotation-info', {
       detail: {
         type: 'image',
+        iri:   annotationIri,
         title: typeText,
         message: message,
         onDelete: () => {

@@ -159,14 +159,23 @@ export class IIIFInterimAnnotator extends HTMLElement {
    *  the annotation IRI on `this._currentAnchorAnnotationIri` so the
    *  Create button knows where to POST. Skip / Esc / backdrop close
    *  leave the annotation un-anchored. */
-  _openAnchorModal(annotationIri, _context = {}) {
+  _openAnchorModal(annotationIri, _context = {}, options = {}) {
     if (!annotationIri) return;
     const modal    = this.shadowRoot.getElementById('anchor-modal');
     const overlay  = this.shadowRoot.getElementById('modal-overlay');
     const classSel = this.shadowRoot.getElementById('anchor-entity-class');
     const levelSel = this.shadowRoot.getElementById('anchor-conceptual-level');
     const input    = this.shadowRoot.getElementById('anchor-entity-input');
+    const title    = this.shadowRoot.getElementById('anchor-modal-title');
+    const createBtn= this.shadowRoot.getElementById('anchor-create-btn');
     if (!modal || !classSel || !levelSel || !input) return;
+
+    const prefill = options.prefill || null;
+    const isEdit  = !!prefill;
+
+    // Header swaps between Create and Edit phrasings.
+    if (title) title.textContent = isEdit ? 'Edit anchor' : 'Anchor this annotation?';
+    if (createBtn) createBtn.textContent = isEdit ? 'Update Anchor' : 'Create Anchor';
 
     // Populate dropdowns from active vocabularies.
     const renderOpt = (o) => {
@@ -177,14 +186,20 @@ export class IIIFInterimAnnotator extends HTMLElement {
     };
     classSel.innerHTML = '';
     this._getEntityClasses().forEach((o) => classSel.appendChild(renderOpt(o)));
-    classSel.value = 'crm:E1_Entity';   // default per spec
+    classSel.value = prefill?.entityClass || 'crm:E1_Entity';
 
     levelSel.innerHTML = '<option value="">— none —</option>';
     this._getConceptualLevels().forEach((o) => levelSel.appendChild(renderOpt(o)));
-    levelSel.value = '';
+    levelSel.value = prefill?.hasConceptualLevel || '';
 
-    // Reset any previous chip / search state.
     this._clearAnchorSelection();
+    if (prefill?.isAnchoredTo) {
+      this._setAnchorSelection({
+        iri:      prefill.isAnchoredTo,
+        label:    prefill.isAnchoredToLabel || prefill.isAnchoredTo,
+        isCustom: !!prefill.isCustomEntity,
+      });
+    }
 
     this._currentAnchorAnnotationIri = annotationIri;
     modal.hidden = false;
@@ -354,6 +369,130 @@ export class IIIFInterimAnnotator extends HTMLElement {
   }
   _escAttr(s) {
     return this._escHtml(s).replace(/"/g, '&quot;');
+  }
+
+  // ── Data Model tab ─────────────────────────────────────────────────
+
+  /** Populate both lists from built-in + localStorage. Idempotent —
+   *  safe to call on every tab activation. */
+  _renderDataModelView() {
+    this._renderDataModelList('levels',  this._getConceptualLevels(),
+      BUILTIN_CONCEPTUAL_LEVELS.map(o => o.iri));
+    this._renderDataModelList('classes', this._getEntityClasses(),
+      BUILTIN_ENTITY_CLASSES.map(o => o.iri));
+    this._wireDataModelButtons();
+  }
+
+  /** Render one section's list. `kind` is 'levels' | 'classes'.
+   *  `builtinIris` is used to mark items as built-in (faint badge,
+   *  no remove button). */
+  _renderDataModelList(kind, items, builtinIris) {
+    const ul = this.shadowRoot.getElementById(`dm-list-${kind}`);
+    if (!ul) return;
+    const trashSvg = `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 6h18M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+    ul.innerHTML = items.map((o) => {
+      const isBuiltin = builtinIris.includes(o.iri);
+      const removeBtn = isBuiltin
+        ? `<span class="dm-item-tag">built-in</span>`
+        : `<button class="dm-item-remove" data-iri="${this._escAttr(o.iri)}"
+                   title="Remove" aria-label="Remove ${this._escAttr(o.label)}">${trashSvg}</button>`;
+      return `
+        <li class="dm-item">
+          <span class="dm-item-label">${this._escHtml(o.label)}</span>
+          <span class="dm-item-iri">${this._escHtml(o.iri)}</span>
+          ${removeBtn}
+        </li>`;
+    }).join('');
+
+    // Wire remove buttons (custom items only).
+    ul.querySelectorAll('.dm-item-remove').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const iri = btn.dataset.iri;
+        const key = kind === 'levels'
+          ? 'mma:dataModel:conceptualLevels'
+          : 'mma:dataModel:entityClasses';
+        let arr = [];
+        try { arr = JSON.parse(localStorage.getItem(key) || '[]'); } catch (_) {}
+        arr = arr.filter((x) => x?.iri !== iri);
+        try { localStorage.setItem(key, JSON.stringify(arr)); } catch (_) {}
+        this._renderDataModelView();
+      });
+    });
+  }
+
+  /** Wire the two "+ Add" buttons + the shared modal's controls.
+   *  Idempotent via `_dmButtonsWired`. */
+  _wireDataModelButtons() {
+    if (this._dmButtonsWired) return;
+    const addLevelBtn = this.shadowRoot.getElementById('dm-add-level-btn');
+    const addClassBtn = this.shadowRoot.getElementById('dm-add-class-btn');
+    const closeBtn   = this.shadowRoot.getElementById('dm-add-modal-close');
+    const saveBtn    = this.shadowRoot.getElementById('dm-add-save-btn');
+    addLevelBtn?.addEventListener('click', () => this._openDmAddModal('levels'));
+    addClassBtn?.addEventListener('click', () => this._openDmAddModal('classes'));
+    closeBtn?.addEventListener('click',    () => this._closeDmAddModal());
+    saveBtn?.addEventListener('click',     () => this._saveDmAddModal());
+
+    // Esc closes the dm add modal too.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const m = this.shadowRoot.getElementById('dm-add-modal');
+      if (m && !m.hidden) this._closeDmAddModal();
+    });
+    this._dmButtonsWired = true;
+  }
+
+  _openDmAddModal(kind) {
+    this._dmAddKind = kind;
+    const modal     = this.shadowRoot.getElementById('dm-add-modal');
+    const title     = this.shadowRoot.getElementById('dm-add-modal-title');
+    const labelInp  = this.shadowRoot.getElementById('dm-add-label');
+    const iriInp    = this.shadowRoot.getElementById('dm-add-iri');
+    if (!modal) return;
+    title.textContent = kind === 'levels'
+      ? 'Add custom conceptual level'
+      : 'Add custom entity class';
+    labelInp.value = '';
+    iriInp.value   = '';
+    modal.hidden = false;
+    setTimeout(() => labelInp.focus(), 50);
+  }
+  _closeDmAddModal() {
+    const modal = this.shadowRoot.getElementById('dm-add-modal');
+    if (modal) modal.hidden = true;
+    this._dmAddKind = null;
+  }
+  _saveDmAddModal() {
+    const kind     = this._dmAddKind;
+    if (!kind) return;
+    const labelInp = this.shadowRoot.getElementById('dm-add-label');
+    const iriInp   = this.shadowRoot.getElementById('dm-add-iri');
+    const label = (labelInp?.value || '').trim();
+    const iri   = (iriInp?.value   || '').trim();
+    if (!label || !iri) {
+      this.updateStatus('Data Model: both label and IRI are required.');
+      return;
+    }
+    const key = kind === 'levels'
+      ? 'mma:dataModel:conceptualLevels'
+      : 'mma:dataModel:entityClasses';
+    let arr = [];
+    try { arr = JSON.parse(localStorage.getItem(key) || '[]'); } catch (_) {}
+    // Dedup: ignore if same IRI already exists.
+    if (arr.some((x) => x?.iri === iri)) {
+      this.updateStatus(`Data Model: ${iri} already in list.`);
+      this._closeDmAddModal();
+      return;
+    }
+    arr.push({ iri, label });
+    try { localStorage.setItem(key, JSON.stringify(arr)); } catch (_) {}
+    this._closeDmAddModal();
+    this._renderDataModelView();
+    this.updateStatus(`Added ${kind === 'levels' ? 'conceptual level' : 'entity class'}: ${label}`);
   }
 
   /** Collect form values, POST to the backend, close on success. The
@@ -582,10 +721,12 @@ export class IIIFInterimAnnotator extends HTMLElement {
     this._buildQueryView();
 
     // Wire the tab strip
-    const tabAnnotate = this.shadowRoot.getElementById('tab-annotate');
-    const tabQuery    = this.shadowRoot.getElementById('tab-query');
-    tabAnnotate?.addEventListener('click', () => this._activateTab('annotate'));
-    tabQuery?.addEventListener('click',    () => this._activateTab('query'));
+    const tabAnnotate  = this.shadowRoot.getElementById('tab-annotate');
+    const tabQuery     = this.shadowRoot.getElementById('tab-query');
+    const tabDataModel = this.shadowRoot.getElementById('tab-datamodel');
+    tabAnnotate?.addEventListener('click',  () => this._activateTab('annotate'));
+    tabQuery?.addEventListener('click',     () => this._activateTab('query'));
+    tabDataModel?.addEventListener('click', () => this._activateTab('datamodel'));
   }
 
   // ── T2.5 Query & Analytics tab ─────────────────────────────────────
@@ -1003,26 +1144,37 @@ export class IIIFInterimAnnotator extends HTMLElement {
   }
 
   _activateTab(name) {
-    const isQuery = name === 'query';
-    const tabAnnotate = this.shadowRoot.getElementById('tab-annotate');
-    const tabQuery    = this.shadowRoot.getElementById('tab-query');
+    const tabs = ['annotate', 'query', 'datamodel'];
+    const active = tabs.includes(name) ? name : 'annotate';
+    const isAnnotate = active === 'annotate';
+
+    for (const t of tabs) {
+      const btn = this.shadowRoot.getElementById(`tab-${t}`);
+      if (!btn) continue;
+      btn.classList.toggle('active', t === active);
+      btn.setAttribute('aria-selected', String(t === active));
+    }
+
     const mainWrapper = this.shadowRoot.querySelector('.main-wrapper');
     const sidebar     = this.shadowRoot.querySelector('.sidebar');
+    if (mainWrapper) {
+      mainWrapper.classList.toggle('tab-query-active',     active === 'query');
+      mainWrapper.classList.toggle('tab-datamodel-active', active === 'datamodel');
+    }
+    if (sidebar) sidebar.style.visibility = isAnnotate ? '' : 'hidden';
 
-    tabAnnotate?.classList.toggle('active', !isQuery);
-    tabQuery?.classList.toggle('active', isQuery);
-    tabAnnotate?.setAttribute('aria-selected', String(!isQuery));
-    tabQuery?.setAttribute('aria-selected', String(isQuery));
+    // Toggle the light-DOM Query mount + the shadow Data Model section.
+    if (this._queryViewMount) this._queryViewMount.classList.toggle('visible', active === 'query');
+    const dm = this.shadowRoot.getElementById('data-model-view');
+    if (dm) dm.hidden = active !== 'datamodel';
 
-    if (mainWrapper) mainWrapper.classList.toggle('tab-query-active', isQuery);
-    if (sidebar) sidebar.style.visibility = isQuery ? 'hidden' : '';
-    if (this._queryViewMount) this._queryViewMount.classList.toggle('visible', isQuery);
-
-    if (isQuery) {
-      // Lazy-load YASGUI the first time the user opens the tab.
+    if (active === 'query') {
       this._activateQueryView().catch((err) => {
         console.warn('[MMA Query] YASGUI activation failed:', err);
       });
+    }
+    if (active === 'datamodel') {
+      this._renderDataModelView();
     }
   }
 
@@ -2229,13 +2381,160 @@ export class IIIFInterimAnnotator extends HTMLElement {
           margin-top: 92px;
         }
 
-        .main-wrapper.tab-query-active {
-          /* In Query view we hide the sidebar + panels area, so the
-             light-DOM YASGUI mount can span the full content width.
+        .main-wrapper.tab-query-active,
+        .main-wrapper.tab-datamodel-active {
+          /* For Query AND Data Model we hide the annotate panels so
+             the alternate view can span the full content width.
              Wrapper still occupies its slot so the footer stays
              aligned, but its content is empty. */
           visibility: hidden;
           pointer-events: none;
+        }
+
+        /* ─── Data Model view ─────────────────────────────────────
+           Lives in shadow DOM (no light-DOM hack needed, this view
+           is pure local components). Positioned fixed under the tab
+           strip, above the footer toolbar, matches Query view
+           geometry. */
+        .data-model-view {
+          position: fixed;
+          top: 92px;
+          left: 0;
+          right: 0;
+          bottom: 48px;
+          display: flex;
+          flex-direction: column;
+          background: var(--mma-bg-base);
+          color: var(--mma-text-primary);
+          z-index: 500;
+          overflow-y: auto;
+          padding: 28px 48px 48px;
+        }
+        .data-model-view[hidden] { display: none; }
+        .data-model-view .dm-header {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          margin-bottom: 28px;
+        }
+        .data-model-view .dm-title {
+          font-family: var(--mma-font-serif);
+          font-size: 22px;
+          font-weight: 500;
+          color: var(--mma-text-primary);
+        }
+        .data-model-view .dm-subtitle {
+          font-size: 12.5px;
+          color: var(--mma-text-muted);
+          line-height: 1.55;
+          max-width: 640px;
+        }
+        .data-model-view .dm-section {
+          margin-bottom: 32px;
+          border: 1px solid var(--mma-border-soft);
+          border-radius: 10px;
+          background: var(--mma-bg-elevated);
+          padding: 22px 24px 18px;
+        }
+        .data-model-view .dm-section-header {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 16px;
+          margin-bottom: 4px;
+        }
+        .data-model-view .dm-section-title {
+          font-family: var(--mma-font-serif);
+          font-size: 15px;
+          font-weight: 500;
+          color: var(--mma-text-primary);
+        }
+        .data-model-view .dm-add-btn {
+          height: 28px;
+          padding: 0 12px;
+          background: transparent;
+          color: var(--mma-accent);
+          border: 1px solid var(--mma-accent-border);
+          border-radius: 999px;
+          cursor: pointer;
+          font-family: var(--mma-font-sans);
+          font-size: 11.5px;
+          font-weight: 500;
+          letter-spacing: 0.02em;
+          transition: background 0.15s ease;
+        }
+        .data-model-view .dm-add-btn:hover {
+          background: var(--mma-accent-bg);
+        }
+        .data-model-view .dm-section-sub {
+          font-size: 11.5px;
+          color: var(--mma-text-faint);
+          line-height: 1.5;
+          margin-bottom: 16px;
+        }
+        .data-model-view .dm-list {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+        }
+        .data-model-view .dm-item {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          padding: 9px 4px;
+          border-top: 1px solid var(--mma-border-soft);
+        }
+        .data-model-view .dm-item:first-child { border-top: none; }
+        .data-model-view .dm-item-label {
+          font-family: var(--mma-font-sans);
+          font-size: 13px;
+          font-weight: 500;
+          color: var(--mma-text-primary);
+          min-width: 240px;
+        }
+        .data-model-view .dm-item-iri {
+          font-family: var(--mma-font-mono);
+          font-size: 11.5px;
+          color: var(--mma-text-muted);
+          flex: 1;
+          word-break: break-all;
+        }
+        .data-model-view .dm-item-tag {
+          font-family: var(--mma-font-mono);
+          font-size: 10px;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: var(--mma-text-faint);
+          padding: 2px 8px;
+          border: 1px solid var(--mma-border);
+          border-radius: 999px;
+        }
+        .data-model-view .dm-item-remove {
+          width: 24px;
+          height: 24px;
+          border: 1px solid var(--mma-border);
+          border-radius: 6px;
+          background: transparent;
+          color: var(--mma-text-faint);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+        }
+        .data-model-view .dm-item-remove:hover {
+          color: #d77a72;
+          border-color: rgba(215, 122, 114, 0.45);
+        }
+        .data-model-view .dm-item-remove svg {
+          width: 12px;
+          height: 12px;
+          stroke: currentColor;
+          fill: none;
+          stroke-width: 1.6;
         }
 
         .sidebar {
@@ -3471,6 +3770,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
       <nav class="tab-strip" role="tablist" aria-label="Workspace tabs">
         <button class="tab active" id="tab-annotate" role="tab" aria-selected="true" aria-controls="view-annotate" data-tab="annotate">Annotate</button>
         <button class="tab" id="tab-query" role="tab" aria-selected="false" aria-controls="view-query" data-tab="query">Query &amp; Analytics</button>
+        <button class="tab" id="tab-datamodel" role="tab" aria-selected="false" aria-controls="data-model-view" data-tab="datamodel">Data Model</button>
       </nav>
 
       <div class="main-wrapper">
@@ -3482,6 +3782,78 @@ export class IIIFInterimAnnotator extends HTMLElement {
         <div class="container">
           <svg id="connection-overlay"></svg>
           <div class="panels-area" id="panels-area"></div>
+        </div>
+      </div>
+
+      <!-- Data Model view (third main tab). Body populated lazily by
+           _renderDataModelView() on first activation. -->
+      <section class="data-model-view" id="data-model-view" hidden>
+        <div class="dm-header">
+          <span class="dm-title">Data Model</span>
+          <span class="dm-subtitle">
+            Vocabulary used by the MLAO Anchor flow. Built-in terms ship
+            with the interim-geko profile; custom additions are stored
+            locally for now (Phase 3 will move them to backend
+            persistence).
+          </span>
+        </div>
+
+        <div class="dm-section" id="dm-section-levels">
+          <div class="dm-section-header">
+            <span class="dm-section-title">Conceptual Levels</span>
+            <button class="dm-add-btn" id="dm-add-level-btn" type="button">+ Add level</button>
+          </div>
+          <p class="dm-section-sub">
+            Levels used to anchor annotations to abstract interpretation
+            tiers (e.g. ICON's Panofsky levels). Drives the
+            <code>mlao:hasConceptualLevel</code> dropdown in the Anchor
+            modal.
+          </p>
+          <ul class="dm-list" id="dm-list-levels"></ul>
+        </div>
+
+        <div class="dm-section" id="dm-section-classes">
+          <div class="dm-section-header">
+            <span class="dm-section-title">Entity Classes</span>
+            <button class="dm-add-btn" id="dm-add-class-btn" type="button">+ Add class</button>
+          </div>
+          <p class="dm-section-sub">
+            Used as types for the real-world entity referenced by
+            <code>mlao:isAnchoredTo</code>. CIDOC-CRM core +
+            <code>skos:Concept</code> ship as built-in. The default in
+            the Anchor modal is <code>crm:E1_Entity</code> (accepts
+            anything).
+          </p>
+          <ul class="dm-list" id="dm-list-classes"></ul>
+        </div>
+      </section>
+
+      <!-- Shared "Add Custom Vocabulary Item" modal. Re-used by both
+           Conceptual Levels and Entity Classes sections (title + the
+           field tying it to the right localStorage key are stamped at
+           open time). -->
+      <div class="anchor-modal mma-modal" id="dm-add-modal" role="dialog" aria-modal="true" aria-labelledby="dm-add-modal-title" hidden>
+        <div class="mma-modal-header">
+          <span class="mma-modal-title" id="dm-add-modal-title">Add</span>
+          <button class="mma-modal-close" id="dm-add-modal-close" aria-label="Close">
+            <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="mma-modal-body anchor-modal-body">
+          <label class="anchor-field">
+            <span class="anchor-field-label">Label</span>
+            <input id="dm-add-label" class="anchor-field-input" type="text" autocomplete="off"
+                   placeholder="e.g. Pre-iconographical" />
+          </label>
+          <label class="anchor-field">
+            <span class="anchor-field-label">IRI / CURIE</span>
+            <input id="dm-add-iri" class="anchor-field-input" type="text" autocomplete="off"
+                   placeholder="e.g. icon:PreiconographicalSubject" />
+            <span class="anchor-field-hint">Full IRI or CURIE (mma:, crm:, mlao:, geko:, icon:, skos:).</span>
+          </label>
+        </div>
+        <div class="mma-modal-footer">
+          <button class="anchor-create-btn" id="dm-add-save-btn" type="button">Save</button>
         </div>
       </div>
 
@@ -3870,8 +4242,34 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
     // Listen for show annotation info requests
     this.addEventListener('show-annotation-info', (e) => {
-      const { type, title, message, onDelete } = e.detail;
-      this.showGlobalAnnotationInfo(title, message, onDelete);
+      const { type, title, message, onDelete, iri } = e.detail;
+      // Augment the popup message with an Anchor block if the cached
+      // annotation has one. The Edit-anchor handler reopens the modal
+      // pre-filled — see _openAnchorModal(iri, {prefill}).
+      let augmentedMessage = message;
+      let onEditAnchor = null;
+      const cached = iri ? this.store?.cache?.get(iri) : null;
+      if (cached?.hasAnchor) {
+        const a = cached.hasAnchor;
+        const safe = (s) => String(s ?? '')
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const anchorIri = safe(a.isAnchoredTo);
+        const label  = a.isAnchoredToLabel ? `${safe(a.isAnchoredToLabel)} <span style="color:var(--mma-text-muted);">(${anchorIri})</span>` : anchorIri;
+        const level  = a.hasConceptualLevel
+          ? `<p style="margin-top:6px;font-size:12px;color:var(--mma-text-muted);">Level: ${safe(a.hasConceptualLevel)}</p>`
+          : '';
+        const isCustomBadge = a.isCustomEntity
+          ? `<span style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--mma-text-faint);margin-left:6px;">custom</span>`
+          : '';
+        augmentedMessage = (message || '') + `
+          <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--mma-accent-border);border-radius:8px;background:var(--mma-accent-bg);">
+            <p style="margin:0;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--mma-text-label);">⚓ Anchored to ${isCustomBadge}</p>
+            <p style="margin:6px 0 0;font-size:13px;color:var(--mma-text-primary);">${label}</p>
+            ${level}
+          </div>`;
+        if (iri) onEditAnchor = () => this._openAnchorModal(iri, {}, { prefill: a });
+      }
+      this.showGlobalAnnotationInfo(title, augmentedMessage, onDelete, onEditAnchor);
     });
 
     // Listen for image region selection events
@@ -5823,7 +6221,7 @@ Annotation Details:
     });
   }
 
-  showGlobalAnnotationInfo(title, message, onDelete) {
+  showGlobalAnnotationInfo(title, message, onDelete, onEditAnchor = null) {
     const sidebar = this.shadowRoot.getElementById('annotation-sidebar');
     const backdrop = this.shadowRoot.getElementById('sidebar-backdrop');
 
@@ -5834,6 +6232,10 @@ Annotation Details:
     // comment bodies.
     const escapeTitle = (s) => String(s ?? '')
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const editAnchorBtnHtml = onEditAnchor
+      ? `<button id="global-annotation-edit-anchor">Edit anchor</button>`
+      : '';
 
     sidebar.innerHTML = `
       <div class="annotation-sidebar-header">
@@ -5846,6 +6248,7 @@ Annotation Details:
       </div>
       <div class="annotation-sidebar-content">${message}</div>
       <div class="annotation-sidebar-buttons">
+        ${editAnchorBtnHtml}
         <button class="delete-btn" id="global-annotation-delete">Delete</button>
       </div>
     `;
@@ -5879,6 +6282,14 @@ Annotation Details:
       closeSidebar();
       if (onDelete) onDelete();
     });
+
+    const editAnchorBtn = sidebar.querySelector('#global-annotation-edit-anchor');
+    if (editAnchorBtn && onEditAnchor) {
+      editAnchorBtn.addEventListener('click', () => {
+        closeSidebar();
+        onEditAnchor();
+      });
+    }
   }
 }
 

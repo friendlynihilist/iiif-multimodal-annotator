@@ -1417,11 +1417,16 @@ export class IIIFTextPanel extends HTMLElement {
       ? `<p>${escape(confirmed.body)}</p><p style="opacity:.6;font-style:italic;margin-top:8px;">on ${sourceSpan}</p>`
       : `<p>${sourceSpan}</p>`;
 
+    // Pass the annotation IRI so the orchestrator can look up its
+    // anchor (M5) and render the ⚓ block in the popup.
+    const annotationIri = element.getAttribute?.('data-annotation-iri') || null;
+
     // Route through the orchestrator's themed annotation-sidebar
     // (single source of truth for the info popup).
     this.dispatchEvent(new CustomEvent('show-annotation-info', {
       detail: {
         type: 'text',
+        iri:   annotationIri,
         title: typeText,
         message: body,
         onDelete: () => {
