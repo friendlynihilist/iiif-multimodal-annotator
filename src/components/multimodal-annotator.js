@@ -1792,6 +1792,9 @@ export class IIIFInterimAnnotator extends HTMLElement {
         }
 
         .profile-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
           padding: 4px 10px;
           font-family: var(--mma-font-mono);
           font-size: 11px;
@@ -1800,8 +1803,9 @@ export class IIIFInterimAnnotator extends HTMLElement {
           background: transparent;
           border: 0.5px solid var(--mma-accent-border);
           border-radius: 4px;
-          letter-spacing: 0.02em;
+          letter-spacing: 0.04em;
         }
+        .profile-badge svg { flex-shrink: 0; }
 
         .app-icon-btn {
           width: 30px;
@@ -2827,7 +2831,13 @@ export class IIIFInterimAnnotator extends HTMLElement {
           justify-content: flex-end;
         }
 
-        .annotation-sidebar button {
+        /* Action buttons in the footer (Cancel / Save / Delete).
+           Explicit :not() exclusion for the header close button so
+           it keeps its 26x26 circle from .annotation-sidebar-close
+           (higher specificity loses without this exception, and the
+           X SVG got clipped inside a 30px-tall pill with 14px of
+           horizontal padding). */
+        .annotation-sidebar button:not(.annotation-sidebar-close) {
           height: 30px;
           padding: 0 14px;
           border: 1px solid var(--mma-border);
@@ -2842,7 +2852,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
           transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
         }
 
-        .annotation-sidebar button:hover {
+        .annotation-sidebar button:not(.annotation-sidebar-close):hover {
           background: var(--mma-surface-hover);
         }
 
@@ -2884,7 +2894,20 @@ export class IIIFInterimAnnotator extends HTMLElement {
           <span class="app-subtitle">${APP_SUBTITLE}</span>
         </div>
         <div class="app-header-actions">
-          <span class="profile-badge" id="profile-badge" title="Active annotation profile">interim-geko</span>
+          <span class="profile-badge" id="profile-badge" title="Active annotation profile: interim-geko">
+            <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"
+                 fill="none" stroke="currentColor" stroke-width="1.7"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <!-- brick wall: outer box + a vertical inner divider + a
+                   horizontal mid-line offset to suggest interlocking
+                   courses of bricks. -->
+              <rect x="3" y="4" width="18" height="16" rx="0.5"/>
+              <path d="M3 12h18"/>
+              <path d="M9 4v8"/>
+              <path d="M15 12v8"/>
+            </svg>
+            <span>INTERIM</span>
+          </span>
           <button class="app-icon-btn" id="theme-toggle-btn" title="Switch theme" aria-label="Switch to light theme">
             <!-- Icon swapped at runtime by _applyTheme(); sun in dark mode = "go to light". -->
             <svg class="theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true">
@@ -2919,13 +2942,9 @@ export class IIIFInterimAnnotator extends HTMLElement {
       </div>
 
       <div class="toolbar">
-        <button id="export-btn" title="Export annotations (flat JSON-LD)">
+        <button id="export-btn" title="Export as GEKO Ekphrasis collection (Collection → Ekphrasis per page → Annotation)">
           <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
           <span>Export</span>
-        </button>
-        <button id="export-geko-btn" title="Export as GEKO Ekphrasis collection (Collection → Ekphrasis-per-page → Annotation)">
-          <svg viewBox="0 0 24 24"><path d="M3 7h18M3 12h18M3 17h12M19 17l3-3M19 17l3 3"/></svg>
-          <span>GEKO</span>
         </button>
         <span class="status" id="status">Ready — Select and confirm text/image, then drag to link</span>
         <span class="copyright">© 2026 Carlo Teo Pedretti</span>
@@ -3063,7 +3082,6 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
   setupEventListeners() {
     const exportBtn = this.shadowRoot.getElementById('export-btn');
-    const exportGekoBtn = this.shadowRoot.getElementById('export-geko-btn');
     const modalityButtons = this.shadowRoot.querySelectorAll('.modality-btn');
     const addPanelBtn = this.shadowRoot.getElementById('add-panel-btn');
     const modalOverlay = this.shadowRoot.getElementById('modal-overlay');
@@ -3275,8 +3293,11 @@ export class IIIFInterimAnnotator extends HTMLElement {
       }, 50);
     });
 
-    exportBtn.addEventListener('click', () => this.exportAnnotations());
-    exportGekoBtn.addEventListener('click', () => this.exportAnnotationsGeko());
+    // Single Export button → GEKO v2 collection (the canonical
+    // poster artefact). The legacy flat-JSON-LD exporter
+    // (this.exportAnnotations) stays in the class for programmatic
+    // callers but is no longer exposed via the toolbar.
+    exportBtn.addEventListener('click', () => this.exportAnnotationsGeko());
 
     // Modality selector buttons
     modalityButtons.forEach(btn => {
@@ -3433,7 +3454,10 @@ export class IIIFInterimAnnotator extends HTMLElement {
     // textElement is inside the shadow DOM of the text panel
     const shadowRoot = textElement.getRootNode();
     let textInViewport = true;
-    const fadeThreshold = 80; // pixels from edge before starting fade
+    // Buffer: fade ONLY after the endpoint has scrolled past the edge
+    // by this many pixels. The previous formula faded while the
+    // endpoint was still near the edge but visible (BUG 5).
+    const offscreenBuffer = 50;
 
     if (shadowRoot && shadowRoot.querySelector) {
       const textArea = shadowRoot.querySelector('.text-area');
@@ -3442,9 +3466,10 @@ export class IIIFInterimAnnotator extends HTMLElement {
         const textTop = textBounds.top;
         const textBottom = textBounds.bottom;
 
-        // Check if text is outside the visible viewport of the scrollable area
-        if (textBottom < textAreaBounds.top + fadeThreshold ||
-            textTop > textAreaBounds.bottom - fadeThreshold) {
+        // Endpoint is "out of view" only when its bottom is above
+        // (areaTop − buffer) OR its top is below (areaBottom + buffer).
+        if (textBottom < textAreaBounds.top - offscreenBuffer ||
+            textTop > textAreaBounds.bottom + offscreenBuffer) {
           textInViewport = false;
         }
       }
@@ -5118,31 +5143,22 @@ Annotation Details:
     const closeSidebar = () => {
       sidebar.classList.remove('visible');
       backdrop.classList.remove('visible');
+      document.removeEventListener('keydown', onEsc);
       setTimeout(() => {
         sidebar.innerHTML = '';
       }, 300);
     };
+    const cancel = () => { closeSidebar(); if (onCancel) onCancel(); };
+    const onEsc = (e) => { if (e.key === 'Escape') cancel(); };
+    document.addEventListener('keydown', onEsc);
 
-    // Close on backdrop click
-    backdrop.addEventListener('click', () => {
-      closeSidebar();
-      if (onCancel) onCancel();
-    });
-
-    closeBtn.addEventListener('click', () => {
-      closeSidebar();
-      if (onCancel) onCancel();
-    });
-
-    cancelBtn.addEventListener('click', () => {
-      closeSidebar();
-      if (onCancel) onCancel();
-    });
+    backdrop.addEventListener('click', cancel);
+    closeBtn.addEventListener('click', cancel);
+    cancelBtn.addEventListener('click', cancel);
 
     saveBtn.addEventListener('click', () => {
       const comment = textarea.value.trim();
       if (!comment) return;
-
       closeSidebar();
       if (onSave) onSave(comment);
     });
@@ -5152,18 +5168,24 @@ Annotation Details:
     const sidebar = this.shadowRoot.getElementById('annotation-sidebar');
     const backdrop = this.shadowRoot.getElementById('sidebar-backdrop');
 
+    // Escape title (display text), let message through as HTML so
+    // callers can pass structured content (<p> blocks etc). Callers
+    // are responsible for escaping user-supplied values inside the
+    // message — iiif-text-panel.showAnnotationInfo does this for
+    // comment bodies.
+    const escapeTitle = (s) => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
     sidebar.innerHTML = `
       <div class="annotation-sidebar-header">
-        <span>${title}</span>
-        <button class="annotation-sidebar-close">
+        <span>${escapeTitle(title)}</span>
+        <button class="annotation-sidebar-close" aria-label="Close">
           <svg viewBox="0 0 24 24">
             <path d="M18 6L6 18M6 6l12 12"/>
           </svg>
         </button>
       </div>
-      <div class="annotation-sidebar-content">
-        <p>${message}</p>
-      </div>
+      <div class="annotation-sidebar-content">${message}</div>
       <div class="annotation-sidebar-buttons">
         <button class="delete-btn" id="global-annotation-delete">Delete</button>
       </div>
@@ -5181,14 +5203,17 @@ Annotation Details:
     const closeSidebar = () => {
       sidebar.classList.remove('visible');
       backdrop.classList.remove('visible');
+      document.removeEventListener('keydown', onEsc);
       setTimeout(() => {
         sidebar.innerHTML = '';
       }, 300);
     };
 
-    // Close on backdrop click
-    backdrop.addEventListener('click', closeSidebar);
+    const onEsc = (e) => { if (e.key === 'Escape') closeSidebar(); };
+    document.addEventListener('keydown', onEsc);
 
+    // Backdrop click + X close
+    backdrop.addEventListener('click', closeSidebar);
     closeBtn.addEventListener('click', closeSidebar);
 
     deleteBtn.addEventListener('click', () => {

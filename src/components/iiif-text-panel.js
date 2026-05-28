@@ -278,56 +278,9 @@ export class IIIFTextPanel extends HTMLElement {
           background: color-mix(in srgb, var(--mma-mod-dynamization) 28%, transparent);
         }
 
-        /* Annotation info popup */
-        .annotation-info-popup {
-          position: absolute;
-          background: var(--color-white);
-          border: 2px solid var(--color-black);
-          padding: calc(var(--spacing-unit) * 1.5);
-          z-index: 10000;
-          min-width: 200px;
-          max-width: 300px;
-          box-shadow: 4px 4px 0 rgba(0,0,0,0.1);
-        }
-
-        .annotation-info-popup-header {
-          font-weight: 600;
-          margin-bottom: calc(var(--spacing-unit) * 1);
-          padding-bottom: calc(var(--spacing-unit) * 0.5);
-          border-bottom: 1px solid var(--color-gray-200);
-        }
-
-        .annotation-info-popup-content {
-          margin-bottom: calc(var(--spacing-unit) * 1);
-          font-size: 0.9rem;
-          line-height: 1.4;
-        }
-
-        .annotation-info-popup-buttons {
-          display: flex;
-          gap: calc(var(--spacing-unit) * 1);
-          justify-content: flex-end;
-        }
-
-        .annotation-info-popup button {
-          width: auto;
-          padding: calc(var(--spacing-unit) * 0.75) calc(var(--spacing-unit) * 1.5);
-        }
-
-        .annotation-info-popup .delete-btn {
-          background: #f44336;
-          border-color: #f44336;
-          color: var(--color-white);
-        }
-
-        .annotation-info-popup .delete-btn svg {
-          stroke: var(--color-white);
-        }
-
-        .annotation-info-popup .delete-btn:hover {
-          background: #d32f2f;
-          border-color: #d32f2f;
-        }
+        /* (annotation-info popup CSS removed — popup is now rendered
+           by the orchestrator's global annotation-sidebar, themed
+           uniformly with the rest of the UI.) */
 
         button {
           width: 32px;
@@ -879,7 +832,7 @@ export class IIIFTextPanel extends HTMLElement {
     } else if (type === 'link') {
       // Change to green and use existing entity linking system
       element.className = 'text-confirmed';
-      this.addToConfirmedElements(element, selection);
+      this.addToConfirmedElements(element, selection, { type: 'entity-linking' });
       this.dispatchEvent(new CustomEvent('text-confirmed', {
         detail: {
           element: element,
@@ -920,8 +873,9 @@ export class IIIFTextPanel extends HTMLElement {
           // Change to green
           element.className = 'text-confirmed';
 
-          // Add to confirmed elements
-          this.addToConfirmedElements(element, selection);
+          // Add to confirmed elements with body so showAnnotationInfo
+          // can render the comment text later.
+          this.addToConfirmedElements(element, selection, { type: 'comment', body: comment });
 
           // Dispatch event with comment
           this.dispatchEvent(new CustomEvent('annotation-created', {
@@ -952,7 +906,7 @@ export class IIIFTextPanel extends HTMLElement {
     element.className = 'text-confirmed';
 
     // Placeholder for now
-    this.addToConfirmedElements(element, selection);
+    this.addToConfirmedElements(element, selection, { type: 'tag', body: '[Tag functionality — coming soon]' });
 
     this.dispatchEvent(new CustomEvent('annotation-created', {
       detail: {
@@ -972,11 +926,15 @@ export class IIIFTextPanel extends HTMLElement {
     this.currentSelectionElement = null;
   }
 
-  addToConfirmedElements(element, selection) {
-    // Add to confirmed elements list (these will persist)
+  addToConfirmedElements(element, selection, extras = {}) {
+    // Add to confirmed elements list (these will persist). `extras`
+    // carries the annotation type and body so showAnnotationInfo
+    // can render the comment/tag value instead of the source span.
     this.confirmedElements.push({
       element: element,
-      selection: selection
+      selection: selection,
+      type: extras.type || null,
+      body: extras.body || null,
     });
   }
 
@@ -1433,96 +1391,68 @@ export class IIIFTextPanel extends HTMLElement {
   }
 
   showAnnotationInfo(element) {
-    // Remove any existing popup
-    const existingPopup = this.shadowRoot.querySelector('.annotation-info-popup');
-    if (existingPopup) existingPopup.remove();
-
     // Find annotation data
     const confirmed = this.confirmedElements.find(c => c.element === element);
     if (!confirmed) return;
 
-    const rect = element.getBoundingClientRect();
-    const shadowRect = this.shadowRoot.host.getBoundingClientRect();
-
-    // Create popup
-    const popup = document.createElement('div');
-    popup.className = 'annotation-info-popup';
-
-    const left = rect.left - shadowRect.left;
-    const top = rect.bottom - shadowRect.top + 5;
-    popup.style.left = `${left}px`;
-    popup.style.top = `${top}px`;
-
-    // Get annotation type and content
+    // Resolve a friendly title from the stored type OR the modality
+    // class on the element (for entity-linking annotations).
     let typeText = 'Annotation';
-    let content = `"${confirmed.selection.text}"`;
+    if (confirmed.type === 'comment') typeText = 'Comment';
+    else if (confirmed.type === 'tag') typeText = 'Tag';
+    else if (element.classList.contains('denotation'))    typeText = 'Entity Linking: Denotation';
+    else if (element.classList.contains('dynamisation'))  typeText = 'Entity Linking: Dynamisation';
+    else if (element.classList.contains('integration'))   typeText = 'Entity Linking: Integration';
+    else if (element.classList.contains('transcription')) typeText = 'Entity Linking: Transcription';
 
-    // Check modality class for entity linking
-    if (element.classList.contains('denotation')) {
-      typeText = 'Entity Linking: Denotation';
-    } else if (element.classList.contains('dynamisation')) {
-      typeText = 'Entity Linking: Dynamisation';
-    } else if (element.classList.contains('integration')) {
-      typeText = 'Entity Linking: Integration';
-    } else if (element.classList.contains('transcription')) {
-      typeText = 'Entity Linking: Transcription';
-    }
+    // Body text: prefer the stored annotation body (comment/tag value),
+    // fall back to the source span for entity-linking annotations
+    // where there is no separate body. Strip out HTML — the panel
+    // renders message as innerHTML, this avoids injection from
+    // user-typed comments.
+    const escape = (s) => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const sourceSpan = `&ldquo;${escape(confirmed.selection.text)}&rdquo;`;
+    const body = confirmed.body
+      ? `<p>${escape(confirmed.body)}</p><p style="opacity:.6;font-style:italic;margin-top:8px;">on ${sourceSpan}</p>`
+      : `<p>${sourceSpan}</p>`;
 
-    popup.innerHTML = `
-      <div class="annotation-info-popup-header">${typeText}</div>
-      <div class="annotation-info-popup-content">${content}</div>
-      <div class="annotation-info-popup-buttons">
-        <button id="annotation-close">Close</button>
-        <button class="delete-btn" id="annotation-delete">
-          <svg viewBox="0 0 24 24">
-            <path d="M3 6h18M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-          </svg>
-        </button>
-      </div>
-    `;
+    // Route through the orchestrator's themed annotation-sidebar
+    // (single source of truth for the info popup).
+    this.dispatchEvent(new CustomEvent('show-annotation-info', {
+      detail: {
+        type: 'text',
+        title: typeText,
+        message: body,
+        onDelete: () => {
+          // Remove element
+          const parent = element.parentNode;
+          const textNode = document.createTextNode(element.textContent);
+          parent.replaceChild(textNode, element);
+          parent.normalize();
 
-    this.shadowRoot.appendChild(popup);
+          // Remove from confirmed elements
+          const index = this.confirmedElements.indexOf(confirmed);
+          if (index > -1) {
+            this.confirmedElements.splice(index, 1);
+          }
 
-    const closeBtn = popup.querySelector('#annotation-close');
-    const deleteBtn = popup.querySelector('#annotation-delete');
+          // Dispatch delete event
+          this.dispatchEvent(new CustomEvent('annotation-deleted', {
+            detail: {
+              element: element,
+              selection: confirmed.selection,
+            },
+            bubbles: true,
+            composed: true,
+          }));
 
-    closeBtn.addEventListener('click', () => popup.remove());
-
-    deleteBtn.addEventListener('click', () => {
-      // Remove element
-      const parent = element.parentNode;
-      const textNode = document.createTextNode(element.textContent);
-      parent.replaceChild(textNode, element);
-      parent.normalize();
-
-      // Remove from confirmed elements
-      const index = this.confirmedElements.indexOf(confirmed);
-      if (index > -1) {
-        this.confirmedElements.splice(index, 1);
-      }
-
-      // Dispatch delete event
-      this.dispatchEvent(new CustomEvent('annotation-deleted', {
-        detail: {
-          element: element,
-          selection: confirmed.selection
+          this.updateInfo('Annotation deleted');
         },
-        bubbles: true,
-        composed: true
-      }));
-
-      popup.remove();
-      this.updateInfo('Annotation deleted');
-    });
-
-    // Close popup when clicking outside
-    const closeOnClickOutside = (e) => {
-      if (!popup.contains(e.target) && e.target !== element) {
-        popup.remove();
-        document.removeEventListener('click', closeOnClickOutside);
-      }
-    };
-    setTimeout(() => document.addEventListener('click', closeOnClickOutside), 0);
+      },
+      bubbles: true,
+      composed: true,
+    }));
   }
 }
 

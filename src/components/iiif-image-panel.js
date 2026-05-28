@@ -866,13 +866,19 @@ export class IIIFImagePanel extends HTMLElement {
         // Store selection data for later use
         this.currentSelectionData = selectionData;
 
-        // Show floating annotation selector immediately
+        // Show floating annotation selector immediately. For freehand
+        // the #current-selection-rect element is an SVG sized to the
+        // full canvas; using its boundingRect would push the menu past
+        // the viewport right edge (BUG 4 — menu invisible). Use the
+        // <path>'s tight bounding box instead.
         const currentSelection = this.shadowRoot.getElementById('current-selection-rect');
         if (currentSelection) {
-          const rect = currentSelection.getBoundingClientRect();
+          let menuAnchorRect = currentSelection.getBoundingClientRect();
+          const pathEl = currentSelection.querySelector?.('path');
+          if (pathEl) menuAnchorRect = pathEl.getBoundingClientRect();
           const container = this.shadowRoot.querySelector('.viewer-container');
           const containerRect = container.getBoundingClientRect();
-          this.showFloatingAnnotationSelector(rect, containerRect);
+          this.showFloatingAnnotationSelector(menuAnchorRect, containerRect);
         }
 
         this.updateInfo(`Freehand path drawn - Choose annotation type`);
@@ -1685,6 +1691,11 @@ export class IIIFImagePanel extends HTMLElement {
           const allConfirmedRects = this.shadowRoot.querySelectorAll('.selection-rect.confirmed, svg.confirmed');
           const confirmedElement = allConfirmedRects[allConfirmedRects.length - 1];
 
+          // Stamp the comment body onto the just-pushed confirmedRects
+          // entry so showImageAnnotationInfo can render it later.
+          const lastRect = this.confirmedRects[this.confirmedRects.length - 1];
+          if (lastRect) { lastRect.type = 'comment'; lastRect.body = comment; }
+
           // Dispatch event
           this.dispatchEvent(new CustomEvent('image-annotation-created', {
             detail: {
@@ -1715,22 +1726,27 @@ export class IIIFImagePanel extends HTMLElement {
 
     // Get annotation type
     let typeText = 'Annotation';
-    if (element.classList.contains('denotation')) {
-      typeText = 'Entity Linking: Denotation';
-    } else if (element.classList.contains('dynamisation')) {
-      typeText = 'Entity Linking: Dynamisation';
-    } else if (element.classList.contains('integration')) {
-      typeText = 'Entity Linking: Integration';
-    } else if (element.classList.contains('transcription')) {
-      typeText = 'Entity Linking: Transcription';
-    }
+    if (confirmed.type === 'comment') typeText = 'Comment';
+    else if (confirmed.type === 'tag') typeText = 'Tag';
+    else if (element.classList.contains('denotation'))    typeText = 'Entity Linking: Denotation';
+    else if (element.classList.contains('dynamisation'))  typeText = 'Entity Linking: Dynamisation';
+    else if (element.classList.contains('integration'))   typeText = 'Entity Linking: Integration';
+    else if (element.classList.contains('transcription')) typeText = 'Entity Linking: Transcription';
+
+    // Render the stored body when present, fall back to a generic
+    // delete-prompt for entity-linking annotations (no body).
+    const escape = (s) => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const message = confirmed.body
+      ? `<p>${escape(confirmed.body)}</p>`
+      : `<p>Click delete to remove this annotation.</p>`;
 
     // Emit event to show global sidebar
     this.dispatchEvent(new CustomEvent('show-annotation-info', {
       detail: {
         type: 'image',
         title: typeText,
-        message: 'Click delete to remove this annotation.',
+        message: message,
         onDelete: () => {
           // Remove element
           element.remove();
