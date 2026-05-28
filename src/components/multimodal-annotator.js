@@ -4,6 +4,27 @@ const CONTAINER_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const DEFAULT_CONTAINER = 'demo-bologna';
 const DEFAULT_BACKEND_URL = 'http://localhost:8000';
 
+// ── MLAO Anchor: built-in vocabulary lists ──────────────────────────
+// Conceptual Levels (Panofsky / ICON) — used for mlao:hasConceptualLevel.
+// The user can extend this set via the Data Model tab (M4 — TODO Phase
+// 3: backend persistence; currently localStorage).
+const BUILTIN_CONCEPTUAL_LEVELS = [
+  { iri: 'icon:PreiconographicalSubject', label: 'Pre-iconographical' },
+  { iri: 'icon:IconographicalSubject',    label: 'Iconographical' },
+  { iri: 'icon:IconologicalSubject',      label: 'Iconological' },
+];
+// Entity Classes — used for mlao:isAnchoredTo target typing. CIDOC-CRM
+// core + skos:Concept as a generic fallback. Default = crm:E1_Entity
+// (accepts anything).
+const BUILTIN_ENTITY_CLASSES = [
+  { iri: 'crm:E1_Entity',           label: 'E1 — Entity (any)' },
+  { iri: 'crm:E21_Person',          label: 'E21 — Person' },
+  { iri: 'crm:E22_HumanMadeObject', label: 'E22 — Human-Made Object' },
+  { iri: 'crm:E53_Place',           label: 'E53 — Place' },
+  { iri: 'crm:E55_Type',            label: 'E55 — Type' },
+  { iri: 'skos:Concept',            label: 'skos — Concept' },
+];
+
 // Single source of truth for the user-visible product name. Used by
 // the header, the about modal, export labels, and (via
 // connectedCallback) document.title.
@@ -110,6 +131,313 @@ export class IIIFInterimAnnotator extends HTMLElement {
   _toggleTheme() {
     const current = this.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
     this._setTheme(current === 'dark' ? 'light' : 'dark', /* persist */ true);
+  }
+
+  // ── MLAO Anchor ────────────────────────────────────────────────────
+
+  /** Combined active vocabulary lists (built-in + Data Model tab
+   *  imports). M4 will populate the localStorage half. */
+  _getConceptualLevels() {
+    let custom = [];
+    try {
+      const raw = localStorage.getItem('mma:dataModel:conceptualLevels');
+      if (raw) custom = JSON.parse(raw);
+    } catch (_) { /* corrupt JSON → ignore */ }
+    return [...BUILTIN_CONCEPTUAL_LEVELS, ...custom];
+  }
+  _getEntityClasses() {
+    let custom = [];
+    try {
+      const raw = localStorage.getItem('mma:dataModel:entityClasses');
+      if (raw) custom = JSON.parse(raw);
+    } catch (_) { /* corrupt JSON → ignore */ }
+    return [...BUILTIN_ENTITY_CLASSES, ...custom];
+  }
+
+  /** Auto-shown after a linking annotation has been persisted by the
+   *  store. Populates the two dropdowns, clears the input, and stamps
+   *  the annotation IRI on `this._currentAnchorAnnotationIri` so the
+   *  Create button knows where to POST. Skip / Esc / backdrop close
+   *  leave the annotation un-anchored. */
+  _openAnchorModal(annotationIri, _context = {}) {
+    if (!annotationIri) return;
+    const modal    = this.shadowRoot.getElementById('anchor-modal');
+    const overlay  = this.shadowRoot.getElementById('modal-overlay');
+    const classSel = this.shadowRoot.getElementById('anchor-entity-class');
+    const levelSel = this.shadowRoot.getElementById('anchor-conceptual-level');
+    const input    = this.shadowRoot.getElementById('anchor-entity-input');
+    if (!modal || !classSel || !levelSel || !input) return;
+
+    // Populate dropdowns from active vocabularies.
+    const renderOpt = (o) => {
+      const opt = document.createElement('option');
+      opt.value = o.iri;
+      opt.textContent = `${o.label} — ${o.iri}`;
+      return opt;
+    };
+    classSel.innerHTML = '';
+    this._getEntityClasses().forEach((o) => classSel.appendChild(renderOpt(o)));
+    classSel.value = 'crm:E1_Entity';   // default per spec
+
+    levelSel.innerHTML = '<option value="">— none —</option>';
+    this._getConceptualLevels().forEach((o) => levelSel.appendChild(renderOpt(o)));
+    levelSel.value = '';
+
+    // Reset any previous chip / search state.
+    this._clearAnchorSelection();
+
+    this._currentAnchorAnnotationIri = annotationIri;
+    modal.hidden = false;
+    overlay?.classList.add('active');
+    setTimeout(() => input.focus(), 50);
+  }
+
+  _closeAnchorModal() {
+    const modal   = this.shadowRoot.getElementById('anchor-modal');
+    const overlay = this.shadowRoot.getElementById('modal-overlay');
+    if (modal) modal.hidden = true;
+    overlay?.classList.remove('active');
+    this._currentAnchorAnnotationIri = null;
+    this._clearAnchorSelection();
+    // Hide any open dropdown so it doesn't ghost across reopenings.
+    const results = this.shadowRoot.getElementById('anchor-search-results');
+    if (results) { results.hidden = true; results.innerHTML = ''; }
+  }
+
+  /** Reset both the chip and the typed value, then show the input. */
+  _clearAnchorSelection() {
+    this._anchorSelection = null;   // { iri, label, isCustom }
+    const chip  = this.shadowRoot.getElementById('anchor-entity-chip');
+    const wrap  = this.shadowRoot.getElementById('anchor-search-wrap');
+    const input = this.shadowRoot.getElementById('anchor-entity-input');
+    if (chip) chip.hidden = true;
+    if (wrap) wrap.hidden = false;
+    if (input) { input.value = ''; }
+  }
+
+  /** Render the selected entity as a chip; hide the search input. */
+  _setAnchorSelection({ iri, label, isCustom }) {
+    this._anchorSelection = { iri, label: label || iri, isCustom: !!isCustom };
+    const chip       = this.shadowRoot.getElementById('anchor-entity-chip');
+    const chipLabel  = this.shadowRoot.getElementById('anchor-chip-label');
+    const chipIri    = this.shadowRoot.getElementById('anchor-chip-iri');
+    const wrap       = this.shadowRoot.getElementById('anchor-search-wrap');
+    const results    = this.shadowRoot.getElementById('anchor-search-results');
+    if (chipLabel) chipLabel.textContent = this._anchorSelection.label;
+    if (chipIri)   chipIri.textContent   = this._anchorSelection.iri;
+    if (chip) chip.hidden = false;
+    if (wrap) wrap.hidden = true;
+    if (results) { results.hidden = true; results.innerHTML = ''; }
+  }
+
+  /** Bind the Wikidata search behaviour to the modal's input. Wired
+   *  once per shadow render (idempotent via `_anchorSearchWired`). */
+  _wireAnchorSearch() {
+    if (this._anchorSearchWired) return;
+    const input    = this.shadowRoot.getElementById('anchor-entity-input');
+    const results  = this.shadowRoot.getElementById('anchor-search-results');
+    const clearBtn = this.shadowRoot.getElementById('anchor-chip-clear');
+    if (!input || !results || !clearBtn) return;
+
+    let debounceId = null;
+    let lastQuery  = '';
+    let inflight   = 0;  // abort old responses landing after a newer one
+
+    const render = (html) => { results.innerHTML = html; results.hidden = false; };
+
+    const runSearch = async (q) => {
+      const myInflight = ++inflight;
+      render(`<li class="anchor-search-loading">Searching Wikidata for &ldquo;${q}&rdquo;…</li>`);
+      let hits = [];
+      try {
+        const url = 'https://www.wikidata.org/w/api.php?'
+          + 'action=wbsearchentities'
+          + '&search=' + encodeURIComponent(q)
+          + '&language=en&format=json&origin=*'
+          + '&limit=7';
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        hits = Array.isArray(data?.search) ? data.search : [];
+      } catch (err) {
+        if (myInflight !== inflight) return;
+        render(
+          `<li class="anchor-search-empty">Wikidata search failed: ${err.message || err}</li>`
+          + this._customEntityOptionHtml(q)
+        );
+        return;
+      }
+      if (myInflight !== inflight) return;   // a newer search superseded us
+      const list = hits.map((h) => {
+        const id    = String(h.id || '');
+        const label = h.label || id;
+        const desc  = h.description || '';
+        return `
+          <li class="anchor-search-result" data-iri="wd:${id}" data-label="${this._escAttr(label)}">
+            <span class="label">${this._escHtml(label)}</span>
+            ${desc ? `<span class="description">${this._escHtml(desc)}</span>` : ''}
+            <span class="iri">wd:${id}</span>
+          </li>`;
+      }).join('');
+      const empty = hits.length === 0
+        ? `<li class="anchor-search-empty">No Wikidata results for &ldquo;${this._escHtml(q)}&rdquo;.</li>`
+        : '';
+      render(list + empty + this._customEntityOptionHtml(q));
+    };
+
+    input.addEventListener('input', () => {
+      const q = input.value.trim();
+      if (q === lastQuery) return;
+      lastQuery = q;
+      clearTimeout(debounceId);
+      if (!q) { results.hidden = true; results.innerHTML = ''; return; }
+      // 300ms debounce per spec.
+      debounceId = setTimeout(() => runSearch(q), 300);
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { results.hidden = true; }
+    });
+
+    // Click on a result (or the create-custom row) — delegate.
+    results.addEventListener('click', (e) => {
+      const li = e.target.closest('.anchor-search-result');
+      if (!li) return;
+      if (li.classList.contains('create-custom')) {
+        const label = li.dataset.label || lastQuery;
+        const iri = `mma:entities/${this._mintCustomEntitySlug()}`;
+        this._setAnchorSelection({ iri, label, isCustom: true });
+      } else {
+        this._setAnchorSelection({
+          iri:   li.dataset.iri,
+          label: li.dataset.label,
+          isCustom: false,
+        });
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      this._clearAnchorSelection();
+      setTimeout(() => input.focus(), 30);
+    });
+
+    this._anchorSearchWired = true;
+  }
+
+  /** HTML for the always-present "+ Create custom entity" option at
+   *  the bottom of the dropdown. */
+  _customEntityOptionHtml(q) {
+    const safe = this._escHtml(q);
+    const attr = this._escAttr(q);
+    return `
+      <li class="anchor-search-result create-custom" data-label="${attr}">
+        <span class="label">+ Create custom entity with label &ldquo;${safe}&rdquo;</span>
+        <span class="iri">mma:entities/{new-ulid}</span>
+      </li>`;
+  }
+
+  /** crypto.randomUUID() is universal in modern browsers; strip the
+   *  dashes + lowercase for a tidy 32-char slug under mma:entities/.
+   *  Not technically a ULID (Phase 1 simplification) but functionally
+   *  equivalent for the demo: opaque, unique, sortable-ish. */
+  _mintCustomEntitySlug() {
+    try {
+      return crypto.randomUUID().replace(/-/g, '').toLowerCase();
+    } catch (_) {
+      // Fallback for ancient browsers / non-secure contexts.
+      return Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+  }
+
+  _escHtml(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  _escAttr(s) {
+    return this._escHtml(s).replace(/"/g, '&quot;');
+  }
+
+  /** Collect form values, POST to the backend, close on success. The
+   *  call is best-effort: any error surfaces in the status bar and
+   *  leaves the modal open for retry. */
+  async _submitAnchor() {
+    const iri = this._currentAnchorAnnotationIri;
+    if (!iri) { this._closeAnchorModal(); return; }
+    const classSel = this.shadowRoot.getElementById('anchor-entity-class');
+    const levelSel = this.shadowRoot.getElementById('anchor-conceptual-level');
+    const input    = this.shadowRoot.getElementById('anchor-entity-input');
+    const createBtn = this.shadowRoot.getElementById('anchor-create-btn');
+    if (!classSel || !levelSel || !input || !createBtn) return;
+
+    const entityClass      = classSel.value || 'crm:E1_Entity';
+    const hasConceptualLvl = levelSel.value || null;
+
+    // Prefer the chip selection (Wikidata pick or custom entity);
+    // fall back to a raw IRI typed in the input as an escape hatch
+    // for power users.
+    const sel = this._anchorSelection;
+    const isAnchoredTo  = sel?.iri || input.value.trim();
+    const isCustom      = !!sel?.isCustom;
+    const isAnchoredToLabel = sel?.label || null;
+
+    if (!isAnchoredTo) {
+      input.focus();
+      this.updateStatus('Anchor: pick a Wikidata hit, create custom, or type an IRI — or click Skip.');
+      return;
+    }
+
+    const payload = {
+      entityClass,
+      isAnchoredTo,
+      isCustomEntity: isCustom,
+    };
+    if (isAnchoredToLabel) payload.isAnchoredToLabel = isAnchoredToLabel;
+    if (hasConceptualLvl)  payload.hasConceptualLevel = hasConceptualLvl;
+
+    // Derive container + id from the annotation IRI.
+    const u = new URL(iri);
+    const parts = u.pathname.split('/').filter(Boolean); // ["w3c", container, id]
+    if (parts.length < 3 || parts[0] !== 'w3c') {
+      this.updateStatus(`Anchor: unrecognised annotation IRI ${iri}`);
+      return;
+    }
+    const url = `${this._backendUrlForExport()}/w3c/${parts[1]}/${parts[2]}/anchor`;
+
+    createBtn.disabled = true;
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(`HTTP ${resp.status}: ${text || resp.statusText}`);
+      }
+      // Stamp the anchor info onto the cached annotation so the GEKO
+      // export picks it up without a round-trip to the backend (and
+      // the upcoming M5 anchor icon can read from the same cache).
+      try {
+        const cached = this.store?.cache?.get(iri);
+        if (cached) {
+          cached.hasAnchor = {
+            type: 'Anchor',
+            isAnchoredTo: isAnchoredTo,
+            isAnchoredToLabel: isAnchoredToLabel,
+            isCustomEntity: isCustom,
+            entityClass: entityClass,
+            ...(hasConceptualLvl ? { hasConceptualLevel: hasConceptualLvl } : {}),
+          };
+        }
+      } catch (_) { /* cache unavailable — export will simply miss
+                       the anchor block until next page load */ }
+      this.updateStatus('Anchor created.');
+      this._closeAnchorModal();
+    } catch (err) {
+      console.warn('[MMA Anchor] POST failed', err);
+      this.updateStatus(`Anchor failed: ${err.message || err}`);
+    } finally {
+      createBtn.disabled = false;
+    }
   }
 
   disconnectedCallback() {
@@ -2451,6 +2779,222 @@ export class IIIFInterimAnnotator extends HTMLElement {
 
         .modality-selector.active { display: block; }
 
+        /* ─── Anchor modal (MLAO) ─── */
+        .anchor-modal {
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          z-index: 10001;
+          min-width: 460px;
+          max-width: 520px;
+          background: var(--mma-bg-elevated);
+          border: 1px solid var(--mma-border);
+          border-radius: 12px;
+          box-shadow: 0 18px 48px rgba(0,0,0,0.45);
+          color: var(--mma-text-primary);
+          font-family: var(--mma-font-sans);
+        }
+        .anchor-modal[hidden] { display: none; }
+        .anchor-modal .mma-modal-header {
+          gap: 12px;
+        }
+        .anchor-skip-link {
+          margin-left: auto;
+          margin-right: 6px;
+          background: transparent;
+          border: none;
+          color: var(--mma-text-muted);
+          font-family: var(--mma-font-sans);
+          font-size: 12px;
+          cursor: pointer;
+          text-decoration: underline;
+          padding: 4px 6px;
+          letter-spacing: 0.01em;
+        }
+        .anchor-skip-link:hover { color: var(--mma-text-primary); }
+        .anchor-modal-body {
+          padding: 16px 18px 8px;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+        .anchor-modal-subtitle {
+          font-size: 12px;
+          line-height: 1.5;
+          color: var(--mma-text-muted);
+          margin: 0 0 4px;
+        }
+        .anchor-field {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .anchor-field-label {
+          font-size: 10.5px;
+          font-weight: 500;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          color: var(--mma-text-label);
+        }
+        .anchor-field-input {
+          height: 34px;
+          padding: 0 10px;
+          font-family: var(--mma-font-mono);
+          font-size: 12.5px;
+          color: var(--mma-text-body);
+          background: var(--mma-bg-base);
+          border: 1px solid var(--mma-border);
+          border-radius: 6px;
+        }
+        select.anchor-field-input { padding: 0 28px 0 10px; }
+        .anchor-field-input:focus {
+          outline: none;
+          border-color: var(--mma-accent-border);
+        }
+        .anchor-field-hint {
+          font-size: 10.5px;
+          color: var(--mma-text-faint);
+          font-style: italic;
+        }
+        .mma-modal-footer {
+          padding: 12px 18px 16px;
+          border-top: 1px solid var(--mma-border-soft);
+          display: flex;
+          justify-content: flex-end;
+          gap: 8px;
+        }
+        .anchor-create-btn {
+          height: 32px;
+          padding: 0 18px;
+          background: var(--mma-accent);
+          color: var(--mma-accent-ink);
+          border: 1px solid var(--mma-accent);
+          border-radius: 999px;
+          font-family: var(--mma-font-sans);
+          font-size: 12px;
+          font-weight: 500;
+          letter-spacing: 0.02em;
+          cursor: pointer;
+          transition: filter 0.15s ease;
+        }
+        .anchor-create-btn:hover { filter: brightness(1.08); }
+        .anchor-create-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          filter: none;
+        }
+
+        /* ── Wikidata search autocomplete + chip ── */
+        .anchor-search-wrap {
+          position: relative;
+        }
+        .anchor-search-results {
+          position: absolute;
+          top: calc(100% + 4px);
+          left: 0;
+          right: 0;
+          z-index: 10002;
+          margin: 0;
+          padding: 4px 0;
+          list-style: none;
+          background: var(--mma-bg-elevated);
+          border: 1px solid var(--mma-border);
+          border-radius: 6px;
+          box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+          max-height: 280px;
+          overflow-y: auto;
+        }
+        .anchor-search-results[hidden] { display: none; }
+        .anchor-search-result {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          padding: 8px 12px;
+          cursor: pointer;
+          border-bottom: 1px solid var(--mma-border-soft);
+        }
+        .anchor-search-result:last-child { border-bottom: none; }
+        .anchor-search-result:hover,
+        .anchor-search-result.active {
+          background: var(--mma-surface-soft);
+        }
+        .anchor-search-result .label {
+          font-size: 13px;
+          color: var(--mma-text-primary);
+          font-weight: 500;
+        }
+        .anchor-search-result .description {
+          font-size: 11px;
+          color: var(--mma-text-faint);
+        }
+        .anchor-search-result .iri {
+          font-family: var(--mma-font-mono);
+          font-size: 10.5px;
+          color: var(--mma-text-muted);
+        }
+        .anchor-search-result.create-custom {
+          background: var(--mma-accent-bg);
+        }
+        .anchor-search-result.create-custom:hover {
+          background: color-mix(in srgb, var(--mma-accent) 28%, transparent);
+        }
+        .anchor-search-result.create-custom .label {
+          color: var(--mma-accent);
+        }
+        .anchor-search-empty,
+        .anchor-search-loading {
+          padding: 10px 12px;
+          color: var(--mma-text-faint);
+          font-size: 12px;
+          font-style: italic;
+        }
+
+        .anchor-entity-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 10px 6px 12px;
+          border: 1px solid var(--mma-accent-border);
+          border-radius: 999px;
+          background: var(--mma-accent-bg);
+          color: var(--mma-text-primary);
+          font-family: var(--mma-font-sans);
+          font-size: 12px;
+          max-width: 100%;
+        }
+        .anchor-entity-chip[hidden] { display: none; }
+        .anchor-chip-label {
+          font-weight: 500;
+        }
+        .anchor-chip-iri {
+          font-family: var(--mma-font-mono);
+          font-size: 10.5px;
+          color: var(--mma-text-muted);
+          opacity: 0.85;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 260px;
+        }
+        .anchor-chip-clear {
+          width: 18px;
+          height: 18px;
+          border: none;
+          background: transparent;
+          color: var(--mma-text-faint);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+          border-radius: 50%;
+        }
+        .anchor-chip-clear:hover {
+          color: var(--mma-accent);
+          background: var(--mma-surface-soft);
+        }
+
         .modality-buttons {
           display: flex;
           flex-direction: column;
@@ -2979,6 +3523,72 @@ export class IIIFInterimAnnotator extends HTMLElement {
         </div>
       </div>
 
+      <!-- MLAO Anchor modal: auto-shown after a linking annotation
+           saves. 4 fields: skip / entity class / isAnchoredTo /
+           conceptual level. Skip leaves the annotation un-anchored. -->
+      <div class="anchor-modal mma-modal" id="anchor-modal" role="dialog" aria-modal="true" aria-labelledby="anchor-modal-title" hidden>
+        <div class="mma-modal-header">
+          <span class="mma-modal-title" id="anchor-modal-title">Anchor this annotation?</span>
+          <button class="anchor-skip-link" id="anchor-skip-btn" type="button">Skip</button>
+          <button class="mma-modal-close" id="anchor-modal-close" aria-label="Close">
+            <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="mma-modal-body anchor-modal-body">
+          <p class="anchor-modal-subtitle">
+            Optional: anchor the annotation to a real-world entity and
+            a conceptual level (MLAO).
+          </p>
+
+          <label class="anchor-field">
+            <span class="anchor-field-label">Entity class</span>
+            <select id="anchor-entity-class" class="anchor-field-input"></select>
+            <span class="anchor-field-hint">What kind of entity is this?</span>
+          </label>
+
+          <div class="anchor-field anchor-field-search">
+            <span class="anchor-field-label">isAnchoredTo &mdash; Real-world entity</span>
+            <!-- Selected chip lives here when a result is picked; the
+                 input + dropdown live below and are hidden while the
+                 chip is shown. -->
+            <div class="anchor-entity-chip" id="anchor-entity-chip" hidden>
+              <span class="anchor-chip-label" id="anchor-chip-label"></span>
+              <span class="anchor-chip-iri"   id="anchor-chip-iri"></span>
+              <button class="anchor-chip-clear" id="anchor-chip-clear"
+                      type="button" aria-label="Clear selection">
+                <svg viewBox="0 0 24 24" width="11" height="11"
+                     fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+            <div class="anchor-search-wrap" id="anchor-search-wrap">
+              <input id="anchor-entity-input" class="anchor-field-input"
+                     type="text"
+                     placeholder="Search Wikidata or create custom…"
+                     autocomplete="off" />
+              <ul class="anchor-search-results" id="anchor-search-results" hidden></ul>
+            </div>
+            <span class="anchor-field-hint">
+              Searches Wikidata in English. If nothing matches, the
+              last item lets you mint a custom entity IRI.
+            </span>
+          </div>
+
+          <label class="anchor-field">
+            <span class="anchor-field-label">Conceptual level</span>
+            <select id="anchor-conceptual-level" class="anchor-field-input">
+              <option value="">— none —</option>
+            </select>
+            <span class="anchor-field-hint">At which interpretive tier?</span>
+          </label>
+        </div>
+        <div class="mma-modal-footer">
+          <button class="anchor-create-btn" id="anchor-create-btn" type="button">Create Anchor</button>
+        </div>
+      </div>
+
       <div class="modal-overlay" id="modal-overlay"></div>
       <div class="add-panel-modal" id="add-panel-modal" role="dialog" aria-modal="true" aria-labelledby="add-panel-title">
         <div class="mma-modal-header">
@@ -3094,6 +3704,21 @@ export class IIIFInterimAnnotator extends HTMLElement {
     // About modal
     appInfoBtn.addEventListener('click', () => this.openAboutModal());
     closeAboutBtn.addEventListener('click', () => this.closeAboutModal());
+
+    // Anchor modal — Skip / X / Create. Esc handled below at document
+    // level so it covers backdrop-less invocations too.
+    const anchorSkipBtn   = this.shadowRoot.getElementById('anchor-skip-btn');
+    const anchorCloseBtn  = this.shadowRoot.getElementById('anchor-modal-close');
+    const anchorCreateBtn = this.shadowRoot.getElementById('anchor-create-btn');
+    if (anchorSkipBtn)   anchorSkipBtn.addEventListener('click', () => this._closeAnchorModal());
+    if (anchorCloseBtn)  anchorCloseBtn.addEventListener('click', () => this._closeAnchorModal());
+    if (anchorCreateBtn) anchorCreateBtn.addEventListener('click', () => this._submitAnchor());
+    this._wireAnchorSearch();
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const modal = this.shadowRoot.getElementById('anchor-modal');
+      if (modal && !modal.hidden) this._closeAnchorModal();
+    });
 
     // Theme toggle — runs once render() has wired the button into the
     // shadow tree. _initTheme() already set the attribute pre-render;
@@ -4180,7 +4805,17 @@ export class IIIFInterimAnnotator extends HTMLElement {
         connection,
         textElement,
         imageRect,
-      }).catch(() => { /* toast */ });
+      })
+        .then((saved) => {
+          // Once the annotation has its real backend IRI, prompt the
+          // user to attach an MLAO Anchor. Skip leaves it un-anchored.
+          // panelType === 'facsimile' is the transcription path which
+          // doesn't carry a modality — keep it un-prompted for now.
+          if (panelType !== 'facsimile' && saved?.id) {
+            this._openAnchorModal(saved.id, { modality, panelType });
+          }
+        })
+        .catch(() => { /* toast */ });
     }
 
     // DON'T remove from unlinked lists - keep them draggable for multiple connections!
@@ -4744,6 +5379,30 @@ Annotation Details:
         label: { en: [mod.label] },
       };
     }
+
+    // MLAO Anchor block. Cleans the stamped cache entry into the
+    // export shape. Wikidata target → string IRI (JSON-LD context
+    // declares isAnchoredTo as @type: @id). Custom entity target →
+    // embedded object carrying the entity's type + label so the
+    // export is self-describing (otherwise the entity description
+    // would only live in the RDF graph). hasConceptualLevel is
+    // optional and only emitted when present.
+    const a = annotation.hasAnchor;
+    if (a && a.isAnchoredTo) {
+      const anchorOut = { type: 'Anchor' };
+      if (a.isCustomEntity) {
+        anchorOut.isAnchoredTo = {
+          id:    a.isAnchoredTo,
+          type:  a.entityClass || 'crm:E1_Entity',
+          ...(a.isAnchoredToLabel ? { label: { en: [a.isAnchoredToLabel] } } : {}),
+        };
+      } else {
+        anchorOut.isAnchoredTo = a.isAnchoredTo;
+      }
+      if (a.hasConceptualLevel) anchorOut.hasConceptualLevel = a.hasConceptualLevel;
+      out.hasAnchor = anchorOut;
+    }
+
     return out;
   }
 

@@ -2,16 +2,19 @@
 
 URL surface:
 
-    POST   /w3c/{container}/                  create
-    GET    /w3c/{container}/                  list IRIs in container
-    GET    /w3c/{container}/{annotation_id}   read one
-    PUT    /w3c/{container}/{annotation_id}   replace one (Acts accumulate)
-    DELETE /w3c/{container}/{annotation_id}   hard delete (graph + Acts)
+    POST   /w3c/{container}/                          create
+    GET    /w3c/{container}/                          list IRIs in container
+    GET    /w3c/{container}/{annotation_id}           read one
+    PUT    /w3c/{container}/{annotation_id}           replace one (Acts accumulate)
+    DELETE /w3c/{container}/{annotation_id}           hard delete (graph + Acts)
+    POST   /w3c/{container}/{annotation_id}/anchor    attach mlao:hasAnchor
 
 Storage model: each annotation lives in its own named graph keyed by the
 annotation IRI. PUT preserves every historical InterpretationAct and
 stamps the previous most-recent one with `dcterms:isReplacedBy <new>`.
-DELETE drops the whole graph (no soft-delete in Phase 1).
+DELETE drops the whole graph (no soft-delete in Phase 1). The /anchor
+sub-route INSERT-appends an mlao:Anchor blank node + optional custom
+entity triples to the same graph (additive — no DROP).
 """
 from __future__ import annotations
 
@@ -21,7 +24,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
-from rdflib import Graph, Literal, Namespace, URIRef
+from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import DCTERMS, RDF, XSD
 
 from app.config import settings
@@ -45,7 +48,9 @@ router = APIRouter(prefix="/w3c")
 
 JSON_LD_MIME = "application/ld+json"
 
-OA = Namespace("http://www.w3.org/ns/oa#")
+OA   = Namespace("http://www.w3.org/ns/oa#")
+MLAO = Namespace("https://w3id.org/mlao/")
+RDFS = Namespace("http://www.w3.org/2000/01/rdf-schema#")
 
 
 # ─── helpers ────────────────────────────────────────────────────────
@@ -283,6 +288,119 @@ async def update_annotation(
     nt = _serialize_nt(new_g)
     await fuseki.replace_graph(iri, nt)
 
+    refreshed_nt = await fuseki.construct_graph(iri)
+    refreshed_g = Graph()
+    refreshed_g.parse(data=refreshed_nt, format="nt")
+    return JSONResponse(
+        content=graph_to_jsonld(refreshed_g, frame_iri=iri),
+        media_type=JSON_LD_MIME,
+    )
+
+
+@router.post("/{container}/{annotation_id}/anchor")
+async def create_annotation_anchor(
+    container: str, annotation_id: str, request: Request,
+) -> Response:
+    """Attach an `mlao:hasAnchor` blank node to an existing annotation.
+
+    Payload (JSON):
+        {
+          "entityClass":          "crm:E1_Entity",          # required
+          "isAnchoredTo":         "http://.../entity/Q...", # required
+          "isAnchoredToLabel":    "turban",                 # optional
+          "isCustomEntity":       false,                    # default false
+          "hasConceptualLevel":   "https://w3id.org/icon/ontology/..."  # optional
+        }
+
+    For Phase 1 the anchor is APPENDED to the annotation's named graph
+    (additive INSERT DATA). Re-anchoring will accumulate triples; M5
+    introduces a separate edit path that DELETEs the old anchor first.
+    When `isCustomEntity` is true, the entity's own RDF type + label
+    are added to the SAME graph (auto-cleanup on annotation delete).
+    """
+    _validate_container(container)
+    _validate_annotation_id(annotation_id)
+    iri = annotation_iri(container, annotation_id)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Request body must be JSON.")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Request body must be a JSON object.")
+
+    entity_class = body.get("entityClass")
+    anchored_to  = body.get("isAnchoredTo")
+    if not entity_class or not isinstance(entity_class, str):
+        raise HTTPException(400, "Missing/invalid 'entityClass'.")
+    if not anchored_to or not isinstance(anchored_to, str):
+        raise HTTPException(400, "Missing/invalid 'isAnchoredTo'.")
+    anchored_to_label = body.get("isAnchoredToLabel")
+    is_custom         = bool(body.get("isCustomEntity", False))
+    conceptual_level  = body.get("hasConceptualLevel")
+
+    # CURIE → IRI expansion. Frontend uses the same prefixes that live
+    # in the bundled JSON-LD context; here we mirror the minimal set
+    # needed for the anchor payload. Anything not matching a prefix is
+    # passed through as a full IRI.
+    PREFIXES = {
+        "mma":     settings.base_ns,
+        "crm":     "http://www.cidoc-crm.org/cidoc-crm/",
+        "mlao":    "https://w3id.org/mlao/",
+        "geko":    "https://w3id.org/geko/",
+        "icon":    "https://w3id.org/icon/ontology/",
+        "skos":    "http://www.w3.org/2004/02/skos/core#",
+        "interim": "https://w3id.org/interim/",
+        "wd":      "http://www.wikidata.org/entity/",
+        "rdfs":    "http://www.w3.org/2000/01/rdf-schema#",
+    }
+    def expand(curie_or_iri: str) -> str:
+        if "://" in curie_or_iri:
+            return curie_or_iri
+        if ":" in curie_or_iri:
+            prefix, _, local = curie_or_iri.partition(":")
+            if prefix in PREFIXES:
+                return PREFIXES[prefix] + local
+        return curie_or_iri
+
+    fuseki = get_client()
+
+    # 404 if the annotation graph doesn't exist.
+    if not await fuseki.graph_exists(iri):
+        raise HTTPException(status_code=404,
+                            detail=f"No annotation at {iri} to anchor.")
+
+    # Build the anchor triples in a fresh Graph, then serialize as NT
+    # and INSERT into the annotation's named graph (additive).
+    g = Graph()
+    ann      = URIRef(iri)
+    anchor   = BNode()
+    target   = URIRef(expand(anchored_to))
+    klass    = URIRef(expand(entity_class))
+
+    g.add((ann,    MLAO.hasAnchor,     anchor))
+    g.add((anchor, RDF.type,           MLAO.Anchor))
+    g.add((anchor, MLAO.isAnchoredTo,  target))
+    if conceptual_level:
+        g.add((anchor, MLAO.hasConceptualLevel, URIRef(expand(conceptual_level))))
+
+    # Custom entity: stamp its type + label in the same graph so
+    # deleting the annotation cleans them up automatically.
+    if is_custom:
+        g.add((target, RDF.type, klass))
+        if anchored_to_label:
+            g.add((target, RDFS.label, Literal(anchored_to_label, lang="en")))
+
+    # Also stamp dcterms:modified on the annotation to reflect the
+    # edit. dcterms:created on the annotation is preserved because we
+    # never DROP, only INSERT.
+    g.add((ann, DCTERMS.modified,
+           Literal(provenance.now_iso(), datatype=XSD.dateTime)))
+
+    nt = _serialize_nt(g)
+    await fuseki.insert_graph(iri, nt)
+
+    # Return the updated annotation, framed as JSON-LD.
     refreshed_nt = await fuseki.construct_graph(iri)
     refreshed_g = Graph()
     refreshed_g.parse(data=refreshed_nt, format="nt")
