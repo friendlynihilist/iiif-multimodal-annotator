@@ -1162,17 +1162,35 @@ export class IIIFInterimAnnotator extends HTMLElement {
     return best;   // { src, rects } | null
   }
 
-  /** Extract the IIIF Image API service IRI from a Presentation
-   *  canvas object. Handles v3 and v2 shapes. Returns null when no
-   *  service is declared (callers should fall back to a static
-   *  <img> tag on /full/max/0/default.jpg). */
+  /** Force-upgrade an http URL to https. Mixed-content blocking
+   *  kills http subresources on https origins; many servers happen
+   *  to also speak https, so a blind upgrade is worth one try. */
+  _maybeUpgradeHttps(url) {
+    if (typeof url !== 'string') return url;
+    if (url.startsWith('http://')) {
+      const upgraded = 'https://' + url.slice('http://'.length);
+      console.warn('[Viz] mixed content — upgrading to https:', url, '→', upgraded);
+      return upgraded;
+    }
+    return url;
+  }
+
+  /** Extract the image resource from a IIIF Presentation canvas. Not
+   *  every canvas advertises an Image API service — some Hertziana /
+   *  Europeana / etc. manifests inline a static JPG/PNG instead. The
+   *  return shape tells the caller which OSD open mode to use:
+   *
+   *    { kind: 'imageApi',    serviceId: '<base>' }
+   *    { kind: 'staticImage', url:        '<full image URL>' }
+   *    null
+   *
+   *  Handles v3 (body.service[0].id, then body.id) and v2
+   *  (resource.service.@id, then resource.@id). */
   _extractImageServiceFromCanvas(canvas) {
     if (!canvas) return null;
-    // IIIF Presentation v3:
-    //   canvas.items[0] (AnnotationPage)
-    //     .items[0] (Annotation, motivation: painting)
-    //       .body (Image)
-    //         .service[0].id  ← here
+    const up = (u) => this._maybeUpgradeHttps(u);
+
+    // ── IIIF Presentation v3 ──
     try {
       const annoPage = canvas.items?.[0];
       const anno     = annoPage?.items?.[0];
@@ -1181,16 +1199,14 @@ export class IIIFInterimAnnotator extends HTMLElement {
                      : (body?.service ? [body.service] : []);
       for (const svc of services) {
         const id = svc?.id || svc?.['@id'];
-        if (id) return id;
+        if (id) return { kind: 'imageApi', serviceId: up(id) };
       }
-      // No service: some v3 manifests inline the image URL as body.id.
-      if (body?.id && !services.length) return body.id;
+      if (body?.id || body?.['@id']) {
+        return { kind: 'staticImage', url: up(body.id || body['@id']) };
+      }
     } catch (_) { /* fall through to v2 */ }
 
-    // IIIF Presentation v2:
-    //   canvas.images[0] (oa:Annotation)
-    //     .resource (dctypes:Image)
-    //       .service.@id  ← here
+    // ── IIIF Presentation v2 ──
     try {
       const image    = canvas.images?.[0];
       const resource = image?.resource;
@@ -1198,10 +1214,10 @@ export class IIIFInterimAnnotator extends HTMLElement {
       const services = Array.isArray(svc) ? svc : (svc ? [svc] : []);
       for (const s of services) {
         const id = s?.['@id'] || s?.id;
-        if (id) return id;
+        if (id) return { kind: 'imageApi', serviceId: up(id) };
       }
       if (resource?.['@id'] || resource?.id) {
-        return resource['@id'] || resource.id;
+        return { kind: 'staticImage', url: up(resource['@id'] || resource.id) };
       }
     } catch (_) { /* nothing matched */ }
     return null;
@@ -1284,8 +1300,9 @@ export class IIIFInterimAnnotator extends HTMLElement {
    *
    *  Wp/Hp = full image pixel dimensions (the OSD content size).
    *  Returns the chip count for the densest cluster (or 0). */
-  _mountHeatmapOverlay(viewer, OSD, rects, Wp, Hp) {
+  _mountHeatmapOverlay(viewer, OSD, rects, Wp, Hp, opts = {}) {
     if (!rects?.length || !Wp || !Hp) return 0;
+    const mode = opts.mode || 'radial';
 
     // Render at image pixel resolution, capped at 2000px on the long
     // side. The CSS blur below adds another perceptual softness so
@@ -1300,18 +1317,39 @@ export class IIIFInterimAnnotator extends HTMLElement {
     const ctx = off.getContext('2d');
     ctx.globalCompositeOperation = 'lighter';
 
-    // Plot one radial gradient per rect. Radius ~ short-side of the
-    // rect scaled by 1.1 so neighbours feather into one another.
-    for (const r of rects) {
-      const cx = (r.x + r.w / 2) * scale;
-      const cy = (r.y + r.h / 2) * scale;
-      const radius = Math.max(r.w, r.h) * scale * 1.1;
-      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-      g.addColorStop(0,    'rgba(255,255,255,0.85)');
-      g.addColorStop(0.45, 'rgba(255,255,255,0.45)');
-      g.addColorStop(1,    'rgba(255,255,255,0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+    if (mode === 'bands') {
+      // PAGE-XML line targets: each rect spans most of the page
+      // width and is line-tall. Draw as a horizontal band with a
+      // soft top/bottom fade so overlapping lines build up to
+      // saturation, but the band shape stays legible.
+      for (const r of rects) {
+        const x = r.x * scale;
+        const y = r.y * scale;
+        const w = r.w * scale;
+        const h = r.h * scale;
+        const g = ctx.createLinearGradient(0, y, 0, y + h);
+        g.addColorStop(0,    'rgba(255,255,255,0)');
+        g.addColorStop(0.35, 'rgba(255,255,255,0.7)');
+        g.addColorStop(0.65, 'rgba(255,255,255,0.7)');
+        g.addColorStop(1,    'rgba(255,255,255,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x, y, w, h);
+      }
+    } else {
+      // Default 'radial' mode — painting hot zones. One radial
+      // blob per rect, radius ~ longest side * 1.1 so neighbours
+      // feather into one another into a continuous heat surface.
+      for (const r of rects) {
+        const cx = (r.x + r.w / 2) * scale;
+        const cy = (r.y + r.h / 2) * scale;
+        const radius = Math.max(r.w, r.h) * scale * 1.1;
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+        g.addColorStop(0,    'rgba(255,255,255,0.85)');
+        g.addColorStop(0.45, 'rgba(255,255,255,0.45)');
+        g.addColorStop(1,    'rgba(255,255,255,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+      }
     }
 
     // Colormap the accumulated alpha.
@@ -1331,14 +1369,17 @@ export class IIIFInterimAnnotator extends HTMLElement {
     }
     ctx.putImageData(img, 0, 0);
 
-    // CSS-level softness + accent glow on hottest pixels.
-    // mix-blend-mode: screen lets the underlying image breathe
-    // through the cool stops, while still building up to opaque
-    // on the hottest peaks.
+    // CSS-level softness. Radial mode gets a fatter blur + accent
+    // glow ("smoke" feel); bands mode gets a tighter blur so the
+    // line shape stays legible (otherwise neighbours smear into a
+    // continuous bar).
     const accent = (getComputedStyle(this).getPropertyValue('--mma-accent') || '#5dcaa5').trim();
+    const filter = mode === 'bands'
+      ? 'blur(6px)'
+      : 'blur(14px) drop-shadow(0 0 6px ' + accent + ')';
     off.style.cssText = [
       'pointer-events:none',
-      'filter:blur(14px) drop-shadow(0 0 6px ' + accent + ')',
+      'filter:' + filter,
       'opacity:' + (isLight ? 0.45 : 0.55),
       'mix-blend-mode:screen',
     ].join(';');
@@ -1436,32 +1477,37 @@ export class IIIFInterimAnnotator extends HTMLElement {
     }
     const OSD = window.OpenSeadragon;
 
-    // Resolve the IIIF Image API service from the canvas. The src
-    // we got from the SPARQL is a Presentation canvas IRI — OSD
-    // needs the Image API endpoint. Fetch the manifest, find the
-    // canvas, extract body.service[0].id (v3) or
-    // images[0].resource.service.@id (v2). On any failure, fall
-    // back to a static <img> so the user at least sees the painting.
+    // Resolve the image resource for this canvas. The src we got
+    // from the SPARQL is a Presentation canvas IRI — OSD needs
+    // either an Image API service or a direct image URL. Fetch the
+    // manifest, find the canvas, extract a structured {kind, ...}
+    // descriptor. On null fall back to a static <img>.
     const manifestUrl = this._manifestUrlFromCanvasIri(src);
-    let serviceId = null;
     let canvasObj = null;
+    let image     = null;
     if (manifestUrl) {
       const manifest = await this._fetchIiifManifest(manifestUrl);
       canvasObj = this._findCanvasInManifest(manifest, src);
-      serviceId = this._extractImageServiceFromCanvas(canvasObj);
+      image     = this._extractImageServiceFromCanvas(canvasObj);
     }
-    if (!serviceId) {
-      // Fallback static image. Better a flat picture than a broken
-      // viewer for the poster.
+    if (!image) {
       viewerEl.innerHTML = `
         <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--mma-q-bg-sunken);">
-          <img src="${this._escAttr(src.replace(/\/$/, '') + '/full/1200,/0/default.jpg')}"
-               alt="" style="max-width:100%;max-height:100%;object-fit:contain;"
-               onerror="this.replaceWith(Object.assign(document.createElement('div'), { className:'viz-error', textContent:'Could not resolve painting image service from ${this._escAttr(src)}', style:'padding:24px;' }))" />
+          <div class="viz-error" style="padding:24px;">Could not resolve painting image from ${this._escHtml(src)}</div>
         </div>`;
       return;
     }
-    const tileSources = `${serviceId.replace(/\/$/, '')}/info.json`;
+
+    // Pick the OSD tilesource shape for the kind we got.
+    let tileSources;
+    if (image.kind === 'imageApi') {
+      tileSources = `${image.serviceId.replace(/\/$/, '')}/info.json`;
+    } else {
+      // 'staticImage' — OSD's "simple image" type opens a single
+      // raster as a one-tile virtual pyramid. No info.json round
+      // trip; works for plain JPG/PNG (Hertziana fotothek etc).
+      tileSources = { type: 'image', url: image.url };
+    }
 
     // Destroy previous viewer instance on refresh.
     if (this._vizPaintingViewer) {
@@ -1544,21 +1590,27 @@ export class IIIFInterimAnnotator extends HTMLElement {
   }
 
   /** Canvases (IIIF 2.x or 3.x) from a manifest, normalised to a
-   *  small dict per canvas: {id, label, imageBase, width, height}. */
+   *  small dict per canvas:
+   *    { id, label, image:{kind,serviceId|url}|null, width, height }
+   *  The `image` field comes from _extractImageServiceFromCanvas so
+   *  the codex detail viewer can dispatch on imageApi vs staticImage
+   *  the same way the painting viewer does. */
   _canvasesFromManifest(manifest) {
     if (!manifest) return [];
     const out = [];
+    const labelOf = (c, im) => {
+      if (typeof c?.label === 'string') return c.label;
+      return c?.label?.en?.[0] || c?.label?.none?.[0] || c?.label?.['@value'] || '';
+    };
     // IIIF 2.x
     if (Array.isArray(manifest.sequences)) {
       const canvases = manifest.sequences[0]?.canvases || [];
       for (const c of canvases) {
         const im = c.images?.[0]?.resource;
-        const service = im?.service;
-        const imageBase = (service && (service['@id'] || service.id)) || im?.['@id'] || im?.id || null;
         out.push({
-          id:        c['@id'] || c.id,
-          label:     (typeof c.label === 'string' ? c.label : (c.label?.en?.[0] || c.label?.['@value'] || '')) || '',
-          imageBase,
+          id:    c['@id'] || c.id,
+          label: labelOf(c, im),
+          image: this._extractImageServiceFromCanvas(c),
           width:  c.width  || im?.width  || 0,
           height: c.height || im?.height || 0,
         });
@@ -1570,12 +1622,10 @@ export class IIIFInterimAnnotator extends HTMLElement {
       for (const c of manifest.items) {
         const anno = c.items?.[0]?.items?.[0];
         const body = anno?.body;
-        const service = Array.isArray(body?.service) ? body.service[0] : body?.service;
-        const imageBase = (service && (service.id || service['@id'])) || body?.id || null;
         out.push({
-          id:        c.id,
-          label:     (typeof c.label === 'string' ? c.label : (c.label?.en?.[0] || c.label?.none?.[0] || '')) || '',
-          imageBase,
+          id:    c.id,
+          label: labelOf(c, body),
+          image: this._extractImageServiceFromCanvas(c),
           width:  c.width  || body?.width  || 0,
           height: c.height || body?.height || 0,
         });
@@ -1630,65 +1680,125 @@ export class IIIFInterimAnnotator extends HTMLElement {
     const annotated = canvases.filter((c) => (countByCanvas.get(c.id) || 0) > 0).length;
     if (statsEl) statsEl.textContent = `${canvases.length} pages · ${annotated} annotated · max ${maxCount}/page`;
 
+    // Per-cell band rects: filter facsimileRegions to this canvas.
+    // Bands rendered as absolute-positioned %-percent overlays so
+    // they scale with the thumbnail container.
+    const bandsByCanvas = new Map();
+    for (const row of (this._vizDataCache?.facsimileRegions || [])) {
+      const src = row?.source?.value;
+      if (!src) continue;
+      const rect = this._parseXywh(row?.xywh?.value);
+      if (!rect) continue;
+      if (!bandsByCanvas.has(src)) bandsByCanvas.set(src, []);
+      bandsByCanvas.get(src).push(rect);
+    }
+
+    // Page-intensity → 4-tier palette (FIX 3 spec).
+    const tierColour = (intensity) => {
+      if (intensity <= 0)    return null;
+      if (intensity <= 0.25) return 'rgba(245,200,90,0.35)';   // low — amber soft
+      if (intensity <= 0.5)  return 'rgba(220,140,60,0.45)';   // medium — amber
+      if (intensity <= 0.75) return 'rgba(200,80,100,0.5)';    // high — terracotta
+      return                        'rgba(180,40,80,0.55)';    // very high — bordeaux
+    };
+
     gridEl.innerHTML = canvases.map((c, i) => {
       const n = countByCanvas.get(c.id) || 0;
       const intensity = maxCount > 0 ? (n / maxCount) : 0;
-      const tintAlpha = (intensity * 0.65).toFixed(3);
+      const colour = tierColour(intensity) || 'transparent';
       const label = c.label || `Canvas ${i + 1}`;
       const tooltip = `Page ${label} — ${n} annotation${n === 1 ? '' : 's'}`;
+      const W = c.width  || 0;
+      const H = c.height || 0;
+      const rects = bandsByCanvas.get(c.id) || [];
+
+      // Stringified band overlays in PERCENT units so they track the
+      // thumbnail's container regardless of its rendered pixel size.
+      const bandsHtml = (W > 0 && H > 0 && rects.length)
+        ? rects.map((r) => {
+            const left = ((r.x) / W * 100).toFixed(2);
+            const top  = ((r.y) / H * 100).toFixed(2);
+            const w    = ((r.w) / W * 100).toFixed(2);
+            const h    = ((r.h) / H * 100).toFixed(2);
+            return `<div class="viz-codex-band" style="position:absolute;left:${left}%;top:${top}%;width:${w}%;height:${h}%;background:${colour};pointer-events:none;"></div>`;
+          }).join('')
+        : '';
+
+      const badge = n > 0
+        ? `<div class="viz-codex-badge" style="position:absolute;top:6px;right:6px;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:10px;font-weight:500;color:var(--mma-q-text-primary);background:var(--mma-q-bg-elevated);border:1px solid ${colour.replace(/,[\d.]+\)$/, ',0.8)')};border-radius:999px;padding:2px 7px;line-height:1.2;pointer-events:none;">${n}</div>`
+        : '';
+
+      // Bottom page label + gradient.
+      const bottomLabel = `
+        <div style="position:absolute;left:0;right:0;bottom:0;padding:14px 8px 6px;background:linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0));pointer-events:none;">
+          <span style="font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:9px;font-weight:500;letter-spacing:0.05em;color:#ffffff;text-shadow:0 1px 2px rgba(0,0,0,0.5);">${this._escHtml(label)}</span>
+        </div>`;
+
+      // Image source: imageApi → derivative; staticImage → URL.
+      let imageUrl = '';
+      let imageKind = '';
+      if (c.image?.kind === 'imageApi') {
+        imageKind = 'imageApi';
+        imageUrl  = `${c.image.serviceId.replace(/\/$/, '')}/full/200,/0/default.jpg`;
+      } else if (c.image?.kind === 'staticImage') {
+        imageKind = 'staticImage';
+        imageUrl  = c.image.url;
+      }
+
       return `
         <button class="viz-codex-cell" type="button"
                 data-canvas-id="${this._escAttr(c.id)}"
                 data-canvas-label="${this._escAttr(label)}"
-                data-image-base="${this._escAttr(c.imageBase || '')}"
-                data-canvas-width="${c.width || 0}"
-                data-canvas-height="${c.height || 0}"
+                data-image-kind="${this._escAttr(imageKind)}"
+                data-image-iri="${this._escAttr(c.image?.serviceId || c.image?.url || '')}"
+                data-canvas-width="${W}"
+                data-canvas-height="${H}"
                 data-annotation-count="${n}"
                 title="${this._escAttr(tooltip)}"
                 style="background:transparent;border:1px solid var(--mma-q-border-soft);border-radius:6px;padding:0;cursor:pointer;display:flex;flex-direction:column;overflow:hidden;transition:transform 0.12s ease, border-color 0.12s ease;">
-          <div class="viz-codex-thumb" data-pending="1"
+          <div class="viz-codex-thumb" data-pending="1" data-image-url="${this._escAttr(imageUrl)}"
                style="position:relative;width:100%;aspect-ratio:3/4;background:var(--mma-q-bg-sunken);">
-            <div class="viz-codex-tint" aria-hidden="true"
-                 style="position:absolute;inset:0;background:rgba(255,80,60,${tintAlpha});pointer-events:none;"></div>
-          </div>
-          <div style="padding:6px 8px;display:flex;justify-content:space-between;align-items:baseline;gap:6px;">
-            <span style="font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:11px;color:var(--mma-q-text-muted);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this._escHtml(label)}</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:${n > 0 ? 'var(--mma-q-accent)' : 'var(--mma-q-text-faint)'};">${n}</span>
+            ${bandsHtml}
+            ${badge}
+            ${bottomLabel}
           </div>
         </button>`;
     }).join('');
 
-    // Inject viz-codex-cell hover style once.
+    // Hover style + selected.
     if (!document.getElementById('mma-viz-codex-style')) {
       const s = document.createElement('style');
       s.id = 'mma-viz-codex-style';
       s.textContent = `
-        .viz-codex-cell:hover { transform: scale(1.03); border-color: var(--mma-q-accent-ring) !important; }
+        .viz-codex-cell:hover { transform: scale(1.02); border-color: var(--mma-q-accent-ring) !important; }
         .viz-codex-cell.selected { border-color: var(--mma-q-accent) !important; box-shadow: 0 0 0 2px var(--mma-q-accent-bg); }
       `;
       document.head.appendChild(s);
     }
 
-    // Lazy-load thumbnails via IntersectionObserver. IIIF 2.x: image
-    // API at .../full/200,/0/default.jpg. Cap width to 200px.
+    // Lazy-load thumbnails via IntersectionObserver. Inserted at the
+    // back of the thumb so the bands + badge + label stay on top
+    // (later siblings paint on top in HTML stacking when z-index is
+    // unset; explicit insertBefore at index 0 puts the img at the
+    // bottom of the stack).
     const io = new IntersectionObserver((entries, obs) => {
       for (const e of entries) {
         if (!e.isIntersecting) continue;
-        const cell  = e.target.closest('.viz-codex-cell');
         const thumb = e.target;
         if (thumb.dataset.pending !== '1') continue;
         thumb.dataset.pending = '0';
-        const base = cell?.dataset?.imageBase || '';
-        if (!base) continue;
-        const url = `${base.replace(/\/$/, '')}/full/200,/0/default.jpg`;
+        const url = thumb.dataset.imageUrl || '';
+        if (!url) { obs.unobserve(thumb); continue; }
         const img = document.createElement('img');
         img.src = url;
         img.alt = '';
         img.loading = 'lazy';
         img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
         img.onerror = () => {
-          thumb.innerHTML = '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--mma-q-text-faint);">no thumb</div>'
-            + thumb.innerHTML;
+          img.replaceWith(Object.assign(document.createElement('div'), {
+            style: 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--mma-q-text-faint);',
+            textContent: 'no thumb',
+          }));
         };
         thumb.insertBefore(img, thumb.firstChild);
         obs.unobserve(thumb);
@@ -1696,10 +1806,22 @@ export class IIIFInterimAnnotator extends HTMLElement {
     }, { rootMargin: '200px' });
     gridEl.querySelectorAll('.viz-codex-thumb').forEach((t) => io.observe(t));
 
-    // Click → open detail. Wired in M5.
+    // Click → open detail.
     gridEl.querySelectorAll('.viz-codex-cell').forEach((btn) => {
       btn.addEventListener('click', () => this._openCodexDetail(btn));
     });
+
+    // Legend under the grid.
+    const legend = document.createElement('div');
+    legend.style.cssText = 'margin-top:16px;display:flex;align-items:center;gap:14px;font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:10px;letter-spacing:0.04em;color:var(--mma-q-text-faint);';
+    legend.innerHTML = `
+      <span>Density</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:10px;border-radius:2px;background:rgba(245,200,90,0.7);"></span>low</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:10px;border-radius:2px;background:rgba(220,140,60,0.8);"></span>medium</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:10px;border-radius:2px;background:rgba(200,80,100,0.85);"></span>high</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:10px;border-radius:2px;background:rgba(180,40,80,0.9);"></span>very high</span>
+    `;
+    gridEl.insertAdjacentElement('afterend', legend);
   }
 
   /** Render the per-page detail under the grid: OSD viewer of the
@@ -1711,18 +1833,17 @@ export class IIIFInterimAnnotator extends HTMLElement {
     if (!cellBtn) return;
     const canvasId    = cellBtn.dataset.canvasId;
     const canvasLabel = cellBtn.dataset.canvasLabel || canvasId;
-    const imageBase   = cellBtn.dataset.imageBase;   // Image API service IRI, set by _renderVizCodex
+    const imageKind   = cellBtn.dataset.imageKind;        // 'imageApi' | 'staticImage' | ''
+    const imageIri    = cellBtn.dataset.imageIri || '';   // serviceId or static URL
     const W = parseInt(cellBtn.dataset.canvasWidth,  10) || 0;
     const H = parseInt(cellBtn.dataset.canvasHeight, 10) || 0;
-    if (!imageBase) {
-      // Without an Image API service we can't open OSD; show a
-      // static image fallback so the user at least sees the page.
-      const host = this._vizViewMount?.querySelector('#mma-viz-codex');
+    if (!imageIri || !imageKind) {
+      const host   = this._vizViewMount?.querySelector('#mma-viz-codex');
       const detail = host?.querySelector('#mma-viz-codex-detail');
       if (detail) {
         detail.innerHTML = `
           <div class="viz-error" style="padding:24px;">
-            No IIIF Image API service for canvas ${this._escHtml(canvasId)}.
+            No image resource resolved for canvas ${this._escHtml(canvasId)}.
           </div>`;
       }
       return;
@@ -1784,12 +1905,17 @@ export class IIIFInterimAnnotator extends HTMLElement {
       this._vizCodexViewer = null;
     }
 
+    // OSD tilesource dispatch on kind (same as painting renderer).
+    const tileSources = imageKind === 'imageApi'
+      ? `${imageIri.replace(/\/$/, '')}/info.json`
+      : { type: 'image', url: imageIri };
+
     let viewer;
     try {
       viewer = OSD({
         element: viewerEl,
         prefixUrl: this._osdPrefixUrl(),
-        tileSources: `${imageBase.replace(/\/$/, '')}/info.json`,
+        tileSources,
         showNavigationControl: true,
         showNavigator: false,
         defaultZoomLevel: 0,
@@ -1811,7 +1937,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
         const Wp = W || dims.x;
         const Hp = H || dims.y;
         if (rects.length === 0) return;
-        this._mountHeatmapOverlay(viewer, OSD, rects, Wp, Hp);
+        this._mountHeatmapOverlay(viewer, OSD, rects, Wp, Hp, { mode: 'bands' });
       } catch (err) {
         console.warn('[Viz] codex detail heatmap failed', err);
       }
