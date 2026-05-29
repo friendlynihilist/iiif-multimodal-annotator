@@ -909,46 +909,8 @@ export class IIIFInterimAnnotator extends HTMLElement {
           color: #d77a72;
           font-style: normal;
         }
-        /* Museale-style desaturation on the OSD tilesource canvas so
-           the heatmap overlay reads. Targets only the tilesource
-           canvas (.openseadragon-canvas direct child) — the overlay
-           container that holds our heatmap is a sibling, unaffected. */
-        #mma-viz-painting-viewer .openseadragon-canvas canvas,
-        #mma-viz-codex-detail-viewer .openseadragon-canvas canvas {
-          filter: grayscale(0.85) brightness(0.7);
-          transition: filter 0.2s ease;
-        }
-        #mma-viz-painting-viewer.color-mode .openseadragon-canvas canvas {
-          filter: none;
-        }
-        /* Color-image toggle on the painting viewer */
-        .viz-color-toggle {
-          position: absolute;
-          top: 8px;
-          right: 8px;
-          z-index: 10;
-          height: 26px;
-          padding: 0 12px;
-          background: var(--mma-q-bg-elevated);
-          color: var(--mma-q-text-body);
-          border: 1px solid var(--mma-q-border);
-          border-radius: 999px;
-          cursor: pointer;
-          font-family: 'JetBrains Mono', ui-monospace, monospace;
-          font-size: 10.5px;
-          font-weight: 500;
-          letter-spacing: 0.04em;
-          text-transform: uppercase;
-        }
-        .viz-color-toggle:hover {
-          color: var(--mma-q-accent);
-          border-color: var(--mma-q-accent-ring);
-        }
-        .viz-color-toggle.active {
-          background: var(--mma-q-accent-bg);
-          color: var(--mma-q-accent);
-          border-color: var(--mma-q-accent);
-        }
+        /* No image desaturation. Sharp rect outlines on the overlay
+           communicate boundaries; the picture stays natural. */
       `;
       document.head.appendChild(style);
     }
@@ -1339,56 +1301,23 @@ export class IIIFInterimAnnotator extends HTMLElement {
     return 'https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon/images/';
   }
 
-  /** Heatmap colormap — v4 informatico/terminal palette.
-   *  Dark: electric yellow → orange → magenta → CYAN at the top.
-   *  Light: desaturated equivalents (no glow; the CSS filter on the
-   *  canvas drops drop-shadow in light, see _mountHeatmapOverlay).
-   *  Smoothstep cubic interpolation, alpha rises with intensity. */
-  _heatmapColorAt(t, isLight) {
-    const smoothstep = (x) => x * x * (3 - 2 * x);
-    const u = smoothstep(Math.max(0, Math.min(1, t)));
-    // 5-stop ramp aligned to the 4-tier spec: transparent → tier1 →
-    // tier2 → tier3 → tier4. The colormap is continuous so peaks at
-    // exactly 0.25/0.5/0.75 read as the expected hue.
-    const stops = isLight ? [
-      [0,   0,   0,   0],
-      [200, 160, 0,   Math.round(0.35 * 255)],   // #c8a000 desat yellow
-      [204, 102, 0,   Math.round(0.50 * 255)],   // #cc6600 desat orange
-      [196, 0,   140, Math.round(0.60 * 255)],   // #c4008c magenta
-      [0,   133, 168, Math.round(0.65 * 255)],   // #0085a8 cyan
-    ] : [
-      [0,   0,   0,   0],
-      [255, 215, 0,   Math.round(0.45 * 255)],   // #ffd700 electric yellow
-      [255, 140, 0,   Math.round(0.60 * 255)],   // #ff8c00 orange
-      [255, 0,   180, Math.round(0.75 * 255)],   // #ff00b4 magenta
-      [0,   212, 255, Math.round(0.85 * 255)],   // #00d4ff cyan
-    ];
-    const N = stops.length - 1;
-    const seg = Math.min(N - 1, Math.floor(u * N));
-    const v   = (u * N) - seg;
-    const a   = stops[seg], b = stops[seg + 1];
-    return [
-      a[0] + (b[0] - a[0]) * v,
-      a[1] + (b[1] - a[1]) * v,
-      a[2] + (b[2] - a[2]) * v,
-      a[3] + (b[3] - a[3]) * v,
-    ];
-  }
-
   /** Build a heatmap canvas at scaled image-pixel resolution from a
-   *  list of {x,y,w,h} rects, apply the museale colormap, and mount
-   *  it as an OSD overlay covering the whole image. Also drops a
-   *  single accent chip ("{N} annotations") over the densest cluster.
+   *  list of {x,y,w,h} rects and mount it as an OSD overlay over
+   *  the whole image. Style: SHARP rectangle outlines + faint
+   *  tier-coloured fills (per-rect density tier; overlap count
+   *  drives the hue). No CSS blur — boundaries stay legible at
+   *  every zoom level. Dark theme adds an accent drop-shadow glow.
    *
    *  Wp/Hp = full image pixel dimensions (the OSD content size).
-   *  Returns the chip count for the densest cluster (or 0). */
+   *  Returns the max overlap count seen (useful for caller stats). */
   _mountHeatmapOverlay(viewer, OSD, rects, Wp, Hp, opts = {}) {
     if (!rects?.length || !Wp || !Hp) return 0;
     const mode = opts.mode || 'radial';
+    const isLight = (document.documentElement.getAttribute('data-mma-theme') === 'light');
 
     // Render at image pixel resolution, capped at 2000px on the long
-    // side. The CSS blur below adds another perceptual softness so
-    // the cap doesn't visibly degrade the result.
+    // side. With the overlay no longer using CSS blur, the cap is
+    // visually safe — strokes stay crisp when OSD scales the canvas.
     const cap = 2000;
     const scale = Math.min(1, cap / Math.max(Wp, Hp));
     const cw = Math.max(1, Math.round(Wp * scale));
@@ -1397,83 +1326,72 @@ export class IIIFInterimAnnotator extends HTMLElement {
     const off = document.createElement('canvas');
     off.width = cw; off.height = ch;
     const ctx = off.getContext('2d');
-    ctx.globalCompositeOperation = 'lighter';
-
-    if (mode === 'bands') {
-      // PAGE-XML line targets: each rect spans most of the page
-      // width and is line-tall. Draw as a horizontal band with a
-      // soft top/bottom fade so overlapping lines build up to
-      // saturation, but the band shape stays legible.
-      for (const r of rects) {
-        const x = r.x * scale;
-        const y = r.y * scale;
-        const w = r.w * scale;
-        const h = r.h * scale;
-        const g = ctx.createLinearGradient(0, y, 0, y + h);
-        g.addColorStop(0,    'rgba(255,255,255,0)');
-        g.addColorStop(0.35, 'rgba(255,255,255,0.7)');
-        g.addColorStop(0.65, 'rgba(255,255,255,0.7)');
-        g.addColorStop(1,    'rgba(255,255,255,0)');
-        ctx.fillStyle = g;
-        ctx.fillRect(x, y, w, h);
+    // Per-rect density: count of rects whose AABB intersects this
+    // one (the rect itself included). Drives the tier colour so
+    // crowded zones read as hotter than isolated regions.
+    const intersects = (a, b) =>
+      a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    const overlaps = rects.map((a) => {
+      let n = 1;
+      for (const b of rects) {
+        if (b !== a && intersects(a, b)) n++;
       }
-    } else {
-      // Default 'radial' mode — painting hot zones. One radial
-      // blob per rect, radius ~ longest side * 1.1 so neighbours
-      // feather into one another into a continuous heat surface.
-      for (const r of rects) {
-        const cx = (r.x + r.w / 2) * scale;
-        const cy = (r.y + r.h / 2) * scale;
-        const radius = Math.max(r.w, r.h) * scale * 1.1;
-        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-        g.addColorStop(0,    'rgba(255,255,255,0.85)');
-        g.addColorStop(0.45, 'rgba(255,255,255,0.45)');
-        g.addColorStop(1,    'rgba(255,255,255,0)');
-        ctx.fillStyle = g;
-        ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
-      }
-    }
+      return n;
+    });
+    const maxOv = Math.max(1, ...overlaps);
 
-    // Colormap the accumulated alpha.
-    const isLight = this.getAttribute('data-theme') === 'light';
-    const img = ctx.getImageData(0, 0, cw, ch);
-    const px  = img.data;
-    let maxA = 0;
-    for (let i = 3; i < px.length; i += 4) if (px[i] > maxA) maxA = px[i];
-    if (maxA === 0) maxA = 1;
-    for (let i = 0; i < px.length; i += 4) {
-      const t = px[i + 3] / maxA;
-      const [r, g, b, a] = this._heatmapColorAt(t, isLight);
-      px[i]     = r;
-      px[i + 1] = g;
-      px[i + 2] = b;
-      px[i + 3] = a;
-    }
-    ctx.putImageData(img, 0, 0);
+    // Tier palette (same as codex grid — keeps the whole tab
+    // chromatically coherent).
+    const tierFor = (intensity) => {
+      const dark = isLight ? [
+        { fill: 'rgba(200,160,0,0.10)',   solid: '#c8a000' },
+        { fill: 'rgba(204,102,0,0.12)',   solid: '#cc6600' },
+        { fill: 'rgba(196,0,140,0.14)',   solid: '#c4008c' },
+        { fill: 'rgba(0,133,168,0.16)',   solid: '#0085a8' },
+      ] : [
+        { fill: 'rgba(255,215,0,0.14)',   solid: '#ffd700' },
+        { fill: 'rgba(255,140,0,0.16)',   solid: '#ff8c00' },
+        { fill: 'rgba(255,0,180,0.18)',   solid: '#ff00b4' },
+        { fill: 'rgba(0,212,255,0.20)',   solid: '#00d4ff' },
+      ];
+      const idx = intensity <= 0.25 ? 0
+                : intensity <= 0.5  ? 1
+                : intensity <= 0.75 ? 2 : 3;
+      return dark[idx];
+    };
 
-    // CSS-level softness. Radial mode gets a fatter blur + cyan
-    // drop-shadow glow ("hot terminal" feel) only in dark; bands
-    // mode gets a tight blur so line shapes stay legible. Light
-    // theme strips the glow entirely — the desaturated colormap
-    // already reads cleanly without it.
+    // Draw each rect as a sharp coloured outline + faint fill. The
+    // fill accumulates visually where rects overlap (normal alpha
+    // compositing — not lighter), so dense regions read brighter
+    // without losing the boundary information.
+    // Stroke width = 4px at image scale → ~2-3px at 1:1 zoom in
+    // the viewer, scales with zoom. Bands mode uses the same
+    // recipe — line regions are just very wide rects.
+    ctx.lineJoin = 'round';
+    ctx.lineCap  = 'square';
+    rects.forEach((r, i) => {
+      const x = r.x * scale, y = r.y * scale;
+      const w = r.w * scale, h = r.h * scale;
+      const intensity = overlaps[i] / maxOv;
+      const t = tierFor(intensity);
+      ctx.fillStyle   = t.fill;
+      ctx.strokeStyle = t.solid;
+      ctx.lineWidth   = mode === 'bands' ? 2 : 3;
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x + ctx.lineWidth / 2, y + ctx.lineWidth / 2,
+                     Math.max(0, w - ctx.lineWidth),
+                     Math.max(0, h - ctx.lineWidth));
+    });
+
+    // No CSS blur — borders stay crisp. Dark theme adds a faint
+    // drop-shadow accent glow so the outlines read on busy images;
+    // light stays clean. Normal blend mode (not screen) so the
+    // tier colours are accurate over any image background.
     const accent = (getComputedStyle(this).getPropertyValue('--mma-accent') || '#00d4ff').trim();
-    let filter;
-    let opacity;
-    if (mode === 'bands') {
-      filter  = isLight ? 'blur(2px)' : 'blur(4px) drop-shadow(0 0 4px ' + accent + ')';
-      opacity = isLight ? 0.7 : 0.85;
-    } else {
-      // Radial (painting). With the underlying tilesource desaturated
-      // by CSS, the heatmap can go to full opacity and read as
-      // luminous colour on grey rather than fighting the picture.
-      filter  = isLight ? 'blur(12px)' : 'blur(14px) drop-shadow(0 0 8px ' + accent + ')';
-      opacity = isLight ? 0.7 : 0.9;
-    }
     off.style.cssText = [
       'pointer-events:none',
-      'filter:' + filter,
-      'opacity:' + opacity,
-      'mix-blend-mode:screen',
+      'filter:' + (isLight ? 'none' : `drop-shadow(0 0 3px ${accent})`),
+      'opacity:1',
     ].join(';');
 
     viewer.addOverlay({
@@ -1481,51 +1399,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
       location: new OSD.Rect(0, 0, 1, Hp / Wp),
     });
 
-    // Densest-cluster label. For each rect, count how many other
-    // rects centre-overlap with its expanded bounds; pick the
-    // winner. Single label only, so the picture stays clean.
-    let winner = null;
-    let winnerCount = 0;
-    for (let i = 0; i < rects.length; i++) {
-      const a = rects[i];
-      const acx = a.x + a.w / 2, acy = a.y + a.h / 2;
-      let n = 1;
-      for (let j = 0; j < rects.length; j++) {
-        if (j === i) continue;
-        const b = rects[j];
-        const bcx = b.x + b.w / 2, bcy = b.y + b.h / 2;
-        const dx = Math.abs(bcx - acx), dy = Math.abs(bcy - acy);
-        if (dx < Math.max(a.w, b.w) * 0.9 && dy < Math.max(a.h, b.h) * 0.9) n++;
-      }
-      if (n > winnerCount) { winnerCount = n; winner = a; }
-    }
-    if (winner && winnerCount >= 2) {
-      const chip = document.createElement('div');
-      chip.textContent = `${winnerCount} annotations`;
-      chip.style.cssText = [
-        'font-family:"IBM Plex Sans", system-ui, sans-serif',
-        'font-size:11px',
-        'font-weight:500',
-        'letter-spacing:0.02em',
-        'color:var(--mma-text-primary, #ecf0f1)',
-        'background:var(--mma-bg-elevated, #252937)',
-        'border:1px solid var(--mma-accent, #5dcaa5)',
-        'box-shadow:0 0 12px rgba(93,202,165,0.45)',
-        'border-radius:999px',
-        'padding:3px 10px',
-        'white-space:nowrap',
-        'transform:translate(-50%, -120%)',  // centre + lift above the cluster
-        'pointer-events:none',
-      ].join(';');
-      const wcx = (winner.x + winner.w / 2) / Wp;
-      const wcy = (winner.y + winner.h / 2) / Hp * (Hp / Wp);  // viewport y axis
-      viewer.addOverlay({
-        element:  chip,
-        location: new OSD.Point(wcx, wcy),
-        placement: OSD.Placement.CENTER,
-      });
-    }
-    return winnerCount;
+    return maxOv;
   }
 
   /** Heatmap renderer: take the dominant painting source from the
@@ -1551,23 +1425,9 @@ export class IIIFInterimAnnotator extends HTMLElement {
         <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mma-q-text-faint);word-break:break-all;">${this._escHtml(src)}</span>
         <span style="font-size:11px;color:var(--mma-q-text-muted);">${rects.length} region${rects.length === 1 ? '' : 's'}</span>
       </div>
-      <div id="mma-viz-painting-viewer" style="position:relative;width:100%;height:480px;background:var(--mma-q-bg-sunken);border:1px solid var(--mma-q-border-soft);border-radius:8px;overflow:hidden;">
-        <button class="viz-color-toggle" id="mma-viz-painting-color-toggle" type="button" aria-pressed="false" title="Show painting at natural saturation (heatmap will be harder to read)">Color image</button>
-      </div>
+      <div id="mma-viz-painting-viewer" style="position:relative;width:100%;height:480px;background:var(--mma-q-bg-sunken);border:1px solid var(--mma-q-border-soft);border-radius:8px;overflow:hidden;"></div>
     `;
     const viewerEl = host.querySelector('#mma-viz-painting-viewer');
-    // Wire the color-image toggle. Default = desaturated (so the
-    // heatmap pops). Click flips a class on the viewer wrapper that
-    // the CSS rule above keys off.
-    const colorToggle = host.querySelector('#mma-viz-painting-color-toggle');
-    if (colorToggle) {
-      colorToggle.addEventListener('click', () => {
-        const on = viewerEl.classList.toggle('color-mode');
-        colorToggle.classList.toggle('active', on);
-        colorToggle.setAttribute('aria-pressed', String(on));
-        colorToggle.textContent = on ? 'Desaturate' : 'Color image';
-      });
-    }
 
     // Ensure OSD is available. The annotator already imports it via
     // the panel components; reuse window.OpenSeadragon.
