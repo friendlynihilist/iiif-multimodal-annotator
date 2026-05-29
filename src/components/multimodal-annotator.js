@@ -1,8 +1,26 @@
-import { AnnotationStore } from '../store/annotation-store.js';
+import { AnnotationStore, iriToContainerAndId } from '../store/annotation-store.js';
 
 const CONTAINER_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const DEFAULT_CONTAINER = 'demo-bologna';
 const DEFAULT_BACKEND_URL = 'http://localhost:8000';
+
+// ── Prefix map mirrored from the backend's PREFIXES in wap.py ───────
+// Used by the GEKO export to serialise IRIs in absolute form (the
+// poster artefact must be self-describing — no CURIEs leaking into
+// the JSON-LD payload). Keep in sync with backend/app/routes/wap.py.
+const EXPORT_PREFIX_MAP = {
+  mma:     'https://w3id.org/multimodal-annotator/ns/',
+  crm:     'http://www.cidoc-crm.org/cidoc-crm/',
+  mlao:    'https://w3id.org/mlao/',
+  geko:    'https://w3id.org/geko/',
+  icon:    'https://w3id.org/icon/ontology/',
+  skos:    'http://www.w3.org/2004/02/skos/core#',
+  interim: 'https://w3id.org/interim/',
+  wd:      'http://www.wikidata.org/entity/',
+  rdfs:    'http://www.w3.org/2000/01/rdf-schema#',
+  oa:      'http://www.w3.org/ns/oa#',
+  lrmoo:   'http://iflastandards.info/ns/lrm/lrmoo/',
+};
 
 // ── MLAO Anchor: built-in vocabulary lists ──────────────────────────
 // Conceptual Levels (Panofsky / ICON) — used for mlao:hasConceptualLevel.
@@ -532,14 +550,21 @@ export class IIIFInterimAnnotator extends HTMLElement {
     if (isAnchoredToLabel) payload.isAnchoredToLabel = isAnchoredToLabel;
     if (hasConceptualLvl)  payload.hasConceptualLevel = hasConceptualLvl;
 
-    // Derive container + id from the annotation IRI.
-    const u = new URL(iri);
-    const parts = u.pathname.split('/').filter(Boolean); // ["w3c", container, id]
-    if (parts.length < 3 || parts[0] !== 'w3c') {
+    // Derive container + id from the annotation IRI. The cached IRI
+    // is in compact CURIE form (mma:annotations/{container}/{ulid})
+    // because the backend's JSON-LD compaction shortens it. The
+    // helper centralises the expand → regex extraction and works for
+    // either compact or expanded input (same fix used by the store's
+    // DELETE/PUT paths after the T1.5b iri-utils refactor).
+    let parsed;
+    try {
+      parsed = iriToContainerAndId(iri);
+    } catch (err) {
+      console.warn('[MMA Anchor] could not parse annotation IRI', iri, err);
       this.updateStatus(`Anchor: unrecognised annotation IRI ${iri}`);
       return;
     }
-    const url = `${this._backendUrlForExport()}/w3c/${parts[1]}/${parts[2]}/anchor`;
+    const url = `${this._backendUrlForExport()}/w3c/${parsed.container}/${parsed.id}/anchor`;
 
     createBtn.disabled = true;
     try {
@@ -719,14 +744,17 @@ export class IIIFInterimAnnotator extends HTMLElement {
     // of the orchestrator). YASGUI is known to fight with shadow DOM —
     // mounting in light DOM avoids the CSS scoping headaches.
     this._buildQueryView();
+    this._buildVizView();
 
     // Wire the tab strip
     const tabAnnotate  = this.shadowRoot.getElementById('tab-annotate');
     const tabQuery     = this.shadowRoot.getElementById('tab-query');
     const tabDataModel = this.shadowRoot.getElementById('tab-datamodel');
+    const tabViz       = this.shadowRoot.getElementById('tab-viz');
     tabAnnotate?.addEventListener('click',  () => this._activateTab('annotate'));
     tabQuery?.addEventListener('click',     () => this._activateTab('query'));
     tabDataModel?.addEventListener('click', () => this._activateTab('datamodel'));
+    tabViz?.addEventListener('click',       () => this._activateTab('viz'));
   }
 
   // ── T2.5 Query & Analytics tab ─────────────────────────────────────
@@ -735,6 +763,386 @@ export class IIIFInterimAnnotator extends HTMLElement {
   _sparqlEndpoint() {
     const base = (this.getAttribute('backend-url') || DEFAULT_BACKEND_URL).replace(/\/$/, '');
     return `${base}/sparql`;
+  }
+
+  /** POST a SPARQL SELECT query to the backend's passthrough proxy
+   *  and return the bindings array. Wrapper used by all the
+   *  Visualization queries. Caller deals with empty bindings. */
+  async _sparqlSelect(query) {
+    const resp = await fetch(this._sparqlEndpoint(), {
+      method:  'POST',
+      headers: {
+        'Accept':       'application/sparql-results+json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({ query }).toString(),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`SPARQL HTTP ${resp.status}: ${text || resp.statusText}`);
+    }
+    const data = await resp.json();
+    return data?.results?.bindings || [];
+  }
+
+  // ── Visualization tab ──────────────────────────────────────────────
+
+  /** Build the Visualization light-DOM mount + stylesheet once.
+   *  Mirror of _buildQueryView's pattern: positioned fixed under
+   *  the tab strip, hidden until the tab activates. */
+  _buildVizView() {
+    if (!document.getElementById('mma-viz-view-style')) {
+      const style = document.createElement('style');
+      style.id = 'mma-viz-view-style';
+      style.textContent = `
+        #mma-viz-view {
+          position: fixed;
+          top: 92px; left: 0; right: 0; bottom: 48px;
+          display: none;
+          flex-direction: column;
+          background: var(--mma-q-bg-base);
+          color: var(--mma-q-text-primary);
+          font-family: 'IBM Plex Sans', system-ui, sans-serif;
+          z-index: 500;
+          overflow-y: auto;
+          padding: 28px 48px 64px;
+        }
+        #mma-viz-view.visible { display: flex; }
+        #mma-viz-view .viz-toolbar {
+          display: flex;
+          justify-content: space-between;
+          align-items: baseline;
+          gap: 16px;
+          margin-bottom: 28px;
+        }
+        #mma-viz-view .viz-page-title {
+          font-family: Spectral, Georgia, serif;
+          font-size: 22px;
+          font-weight: 500;
+          color: var(--mma-q-text-primary);
+        }
+        #mma-viz-view .viz-refresh-btn {
+          height: 30px;
+          padding: 0 14px;
+          background: transparent;
+          color: var(--mma-q-accent);
+          border: 1px solid var(--mma-q-accent-ring);
+          border-radius: 999px;
+          cursor: pointer;
+          font-family: inherit;
+          font-size: 11.5px;
+          font-weight: 500;
+          letter-spacing: 0.04em;
+        }
+        #mma-viz-view .viz-refresh-btn:hover {
+          background: var(--mma-q-accent-bg);
+        }
+        #mma-viz-view .viz-refresh-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        #mma-viz-view .viz-section {
+          margin-bottom: 36px;
+          border: 1px solid var(--mma-q-border-soft);
+          border-radius: 10px;
+          background: var(--mma-q-bg-elevated);
+          padding: 24px 26px 22px;
+        }
+        #mma-viz-view .viz-section-header {
+          margin-bottom: 16px;
+        }
+        #mma-viz-view .viz-section-title {
+          font-family: Spectral, Georgia, serif;
+          font-size: 16px;
+          font-weight: 500;
+          color: var(--mma-q-text-primary);
+          margin: 0 0 4px;
+        }
+        #mma-viz-view .viz-section-sub {
+          font-size: 12px;
+          color: var(--mma-q-text-muted);
+          line-height: 1.5;
+          margin: 0;
+        }
+        #mma-viz-view .viz-section-body {
+          min-height: 200px;
+          position: relative;
+        }
+        #mma-viz-view .viz-empty,
+        #mma-viz-view .viz-loading,
+        #mma-viz-view .viz-error {
+          padding: 28px 16px;
+          font-size: 12.5px;
+          color: var(--mma-q-text-faint);
+          font-style: italic;
+          text-align: center;
+        }
+        #mma-viz-view .viz-error {
+          color: #d77a72;
+          font-style: normal;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    if (!this._vizViewMount) {
+      const wrap = document.createElement('div');
+      wrap.id = 'mma-viz-view';
+      wrap.innerHTML = `
+        <div class="viz-toolbar">
+          <span class="viz-page-title">Visualization</span>
+          <button class="viz-refresh-btn" id="mma-viz-refresh-btn" type="button">Refresh data</button>
+        </div>
+
+        <section class="viz-section" data-viz="modalities">
+          <div class="viz-section-header">
+            <h3 class="viz-section-title">Ekphrastic modalities</h3>
+            <p class="viz-section-sub">How annotations distribute across GEKO modalities.</p>
+          </div>
+          <div class="viz-section-body" id="mma-viz-donut">
+            <div class="viz-loading">Loading…</div>
+          </div>
+        </section>
+
+        <section class="viz-section" data-viz="painting">
+          <div class="viz-section-header">
+            <h3 class="viz-section-title">Painting hot zones</h3>
+            <p class="viz-section-sub">Which regions of the artwork attract the most ekphrastic attention.</p>
+          </div>
+          <div class="viz-section-body" id="mma-viz-painting">
+            <div class="viz-loading">Loading…</div>
+          </div>
+        </section>
+
+        <section class="viz-section" data-viz="codex">
+          <div class="viz-section-header">
+            <h3 class="viz-section-title">Codex view — manuscript heat</h3>
+            <p class="viz-section-sub">Annotation density across the manuscript pages. Click a page to inspect.</p>
+          </div>
+          <div class="viz-section-body" id="mma-viz-codex">
+            <div class="viz-loading">Loading…</div>
+          </div>
+        </section>
+      `;
+      document.body.appendChild(wrap);
+      this._vizViewMount = wrap;
+
+      const refreshBtn = wrap.querySelector('#mma-viz-refresh-btn');
+      refreshBtn?.addEventListener('click', () => {
+        this._vizDataCache = null;
+        this._activateVizView({ force: true }).catch(() => {});
+      });
+    }
+  }
+
+  /** Activate the Visualization tab: lazy-load Chart.js then refresh
+   *  all three viz sections. Errors per-viz don't tear the others
+   *  down (each renderer catches its own and shows an inline message). */
+  async _activateVizView({ force = false } = {}) {
+    if (!force && this._vizDataCache) {
+      // Already loaded; nothing to do (the DOM still holds the
+      // last-rendered chart).
+      return;
+    }
+    const refreshBtn = this._vizViewMount?.querySelector('#mma-viz-refresh-btn');
+    if (refreshBtn) refreshBtn.disabled = true;
+    try {
+      await this._loadVizData();
+      await this._renderVizModalities();
+      await this._renderVizPainting();
+      await this._renderVizCodex();
+    } finally {
+      if (refreshBtn) refreshBtn.disabled = false;
+    }
+  }
+
+  /** Run the three SPARQL queries in parallel and cache. */
+  async _loadVizData() {
+    const [modalities, paintingRegions, facsimileCounts, facsimileRegions] =
+      await Promise.all([
+        this._sparqlSelect(`
+          SELECT ?modality (COUNT(?ann) AS ?count) WHERE {
+            GRAPH ?g {
+              ?ann a <http://www.w3.org/ns/oa#Annotation> ;
+                   <https://w3id.org/geko/hasEkphrasticModality> ?modality .
+            }
+          } GROUP BY ?modality
+        `).catch((e) => { console.warn('[Viz] modalities query failed', e); return []; }),
+        this._sparqlSelect(`
+          SELECT ?source ?xywh WHERE {
+            GRAPH ?g {
+              ?ann a <http://www.w3.org/ns/oa#Annotation> ;
+                   <http://www.w3.org/ns/oa#hasTarget> ?target .
+              ?target a <http://iflastandards.info/ns/lrm/lrmoo/F1_Work> ;
+                      <http://www.w3.org/ns/oa#hasSource> ?source ;
+                      <http://www.w3.org/ns/oa#hasSelector> ?sel .
+              ?sel <http://www.w3.org/1999/02/22-rdf-syntax-ns#value> ?xywh .
+              FILTER(STRSTARTS(STR(?xywh), "xywh="))
+            }
+          }
+        `).catch((e) => { console.warn('[Viz] painting query failed', e); return []; }),
+        this._sparqlSelect(`
+          SELECT ?facsimileCanvas (COUNT(?ann) AS ?count) WHERE {
+            GRAPH ?g {
+              ?ann a <http://www.w3.org/ns/oa#Annotation> ;
+                   <http://www.w3.org/ns/oa#hasTarget> ?target .
+              ?target a <http://iflastandards.info/ns/lrm/lrmoo/F2_Expression> ;
+                      <http://www.w3.org/ns/oa#hasSource> ?facsimileCanvas .
+            }
+          } GROUP BY ?facsimileCanvas
+        `).catch((e) => { console.warn('[Viz] facsimile counts query failed', e); return []; }),
+        this._sparqlSelect(`
+          SELECT ?source ?xywh WHERE {
+            GRAPH ?g {
+              ?ann a <http://www.w3.org/ns/oa#Annotation> ;
+                   <http://www.w3.org/ns/oa#hasTarget> ?target .
+              ?target a <http://iflastandards.info/ns/lrm/lrmoo/F2_Expression> ;
+                      <http://www.w3.org/ns/oa#hasSource> ?source ;
+                      <http://www.w3.org/ns/oa#hasSelector> ?sel .
+              ?sel <http://www.w3.org/1999/02/22-rdf-syntax-ns#value> ?xywh .
+              FILTER(STRSTARTS(STR(?xywh), "xywh="))
+            }
+          }
+        `).catch((e) => { console.warn('[Viz] facsimile regions query failed', e); return []; }),
+      ]);
+    this._vizDataCache = { modalities, paintingRegions, facsimileCounts, facsimileRegions };
+  }
+
+  /** Lazy-load Chart.js from CDN. Idempotent. */
+  _loadChartJs() {
+    if (window.Chart) return Promise.resolve(window.Chart);
+    if (this._chartJsLoadingPromise) return this._chartJsLoadingPromise;
+    this._chartJsLoadingPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+      s.async = true;
+      s.onload  = () => resolve(window.Chart);
+      s.onerror = () => reject(new Error('Failed to load Chart.js from CDN'));
+      document.head.appendChild(s);
+    });
+    return this._chartJsLoadingPromise;
+  }
+
+  /** Map any incoming modality token (URI, CURIE, vocab string, with
+   *  either dynamisation/dynamization spelling) to one of the three
+   *  canonical GEKO modality slots. */
+  _normalizeModalityForViz(token) {
+    if (!token) return null;
+    const key = String(token).toLowerCase().split(/[#\/]/).pop().replace(/-/g, '');
+    if (key === 'denotation')   return 'denotation';
+    if (key === 'dynamisation' || key === 'dynamization') return 'dynamization';
+    if (key === 'integration')  return 'integration';
+    return null;
+  }
+
+  /** Read --mma-mod-* tokens from the orchestrator's :host so the
+   *  chart colours track the active theme automatically. */
+  _modalityColours() {
+    const cs = getComputedStyle(this);
+    const pick = (name, fallback) => (cs.getPropertyValue(name) || '').trim() || fallback;
+    return {
+      denotation:   pick('--mma-mod-denotation',   '#5dcaa5'),
+      dynamization: pick('--mma-mod-dynamization', '#7da9d6'),
+      integration:  pick('--mma-mod-integration',  '#d09b7a'),
+    };
+  }
+
+  async _renderVizModalities() {
+    const host = this._vizViewMount?.querySelector('#mma-viz-donut');
+    if (!host) return;
+
+    // Normalise the SPARQL bindings into the three canonical buckets.
+    const buckets = { denotation: 0, dynamization: 0, integration: 0 };
+    for (const row of (this._vizDataCache?.modalities || [])) {
+      const slot = this._normalizeModalityForViz(row?.modality?.value);
+      if (!slot) continue;
+      const n = parseInt(row?.count?.value, 10);
+      if (Number.isFinite(n)) buckets[slot] += n;
+    }
+    const total = buckets.denotation + buckets.dynamization + buckets.integration;
+    if (total === 0) {
+      host.innerHTML = `<div class="viz-empty">No annotations yet to visualize.</div>`;
+      return;
+    }
+
+    let Chart;
+    try {
+      Chart = await this._loadChartJs();
+    } catch (err) {
+      host.innerHTML = `<div class="viz-error">${err.message}</div>`;
+      return;
+    }
+
+    const colours = this._modalityColours();
+    const textBody  = (getComputedStyle(this).getPropertyValue('--mma-text-body') || '#d8dce5').trim();
+    const textFaint = (getComputedStyle(this).getPropertyValue('--mma-text-faint') || '#7a8194').trim();
+
+    // Replace placeholder with chart + legend layout.
+    host.innerHTML = `
+      <div class="viz-donut-wrap" style="display:flex;align-items:center;gap:32px;flex-wrap:wrap;">
+        <div class="viz-donut-canvas-wrap" style="position:relative;width:240px;height:240px;flex-shrink:0;">
+          <canvas id="mma-viz-donut-canvas" width="240" height="240"></canvas>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:500;color:${textBody};">${total}</div>
+            <div style="font-size:10.5px;letter-spacing:0.14em;text-transform:uppercase;color:${textFaint};margin-top:2px;">annotations</div>
+          </div>
+        </div>
+        <ul class="viz-donut-legend" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;font-size:13px;color:${textBody};">
+          ${[
+            { slot: 'denotation',   label: 'Denotation'   },
+            { slot: 'dynamization', label: 'Dynamization' },
+            { slot: 'integration',  label: 'Integration'  },
+          ].map(({ slot, label }) => {
+            const n = buckets[slot];
+            const pct = total ? Math.round((n / total) * 100) : 0;
+            return `
+              <li style="display:flex;align-items:center;gap:12px;">
+                <span style="width:14px;height:14px;border-radius:50%;background:${colours[slot]};flex-shrink:0;"></span>
+                <span style="min-width:130px;">${label}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${textBody};">${n}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${textFaint};">${pct}%</span>
+              </li>`;
+          }).join('')}
+        </ul>
+      </div>
+    `;
+
+    const canvas = host.querySelector('#mma-viz-donut-canvas');
+    // Destroy a previous chart instance if we're re-rendering on
+    // refresh — Chart.js complains otherwise.
+    if (this._donutChart) { try { this._donutChart.destroy(); } catch (_) {} }
+    this._donutChart = new Chart(canvas.getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels: ['Denotation', 'Dynamization', 'Integration'],
+        datasets: [{
+          data: [buckets.denotation, buckets.dynamization, buckets.integration],
+          backgroundColor: [colours.denotation, colours.dynamization, colours.integration],
+          borderColor: 'transparent',
+          borderWidth: 0,
+          hoverOffset: 6,
+        }],
+      },
+      options: {
+        responsive: false,
+        cutout: '68%',
+        plugins: { legend: { display: false }, tooltip: {
+          backgroundColor: '#1f2330',
+          titleColor: '#ecf0f1', bodyColor: '#d8dce5',
+          borderColor: 'rgba(255,255,255,0.08)', borderWidth: 1,
+          padding: 10, cornerRadius: 6,
+        } },
+        animation: { duration: 600, easing: 'easeOutQuart' },
+      },
+    });
+  }
+  async _renderVizPainting() {
+    const host = this._vizViewMount?.querySelector('#mma-viz-painting');
+    if (host) host.innerHTML = `<div class="viz-empty">Painting heatmap — M3</div>`;
+  }
+  async _renderVizCodex() {
+    const host = this._vizViewMount?.querySelector('#mma-viz-codex');
+    if (host) host.innerHTML = `<div class="viz-empty">Codex grid — M4+M5</div>`;
   }
 
   /** Sample queries pre-loaded in the YASGUI dropdown. Predicates
@@ -1144,7 +1552,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
   }
 
   _activateTab(name) {
-    const tabs = ['annotate', 'query', 'datamodel'];
+    const tabs = ['annotate', 'query', 'datamodel', 'viz'];
     const active = tabs.includes(name) ? name : 'annotate';
     const isAnnotate = active === 'annotate';
 
@@ -1160,11 +1568,14 @@ export class IIIFInterimAnnotator extends HTMLElement {
     if (mainWrapper) {
       mainWrapper.classList.toggle('tab-query-active',     active === 'query');
       mainWrapper.classList.toggle('tab-datamodel-active', active === 'datamodel');
+      mainWrapper.classList.toggle('tab-viz-active',       active === 'viz');
     }
     if (sidebar) sidebar.style.visibility = isAnnotate ? '' : 'hidden';
 
-    // Toggle the light-DOM Query mount + the shadow Data Model section.
+    // Toggle the light-DOM Query + Viz mounts and the shadow
+    // Data Model section.
     if (this._queryViewMount) this._queryViewMount.classList.toggle('visible', active === 'query');
+    if (this._vizViewMount)   this._vizViewMount.classList.toggle('visible',   active === 'viz');
     const dm = this.shadowRoot.getElementById('data-model-view');
     if (dm) dm.hidden = active !== 'datamodel';
 
@@ -1175,6 +1586,11 @@ export class IIIFInterimAnnotator extends HTMLElement {
     }
     if (active === 'datamodel') {
       this._renderDataModelView();
+    }
+    if (active === 'viz') {
+      this._activateVizView().catch((err) => {
+        console.warn('[MMA Viz] activation failed:', err);
+      });
     }
   }
 
@@ -2382,11 +2798,12 @@ export class IIIFInterimAnnotator extends HTMLElement {
         }
 
         .main-wrapper.tab-query-active,
-        .main-wrapper.tab-datamodel-active {
-          /* For Query AND Data Model we hide the annotate panels so
-             the alternate view can span the full content width.
-             Wrapper still occupies its slot so the footer stays
-             aligned, but its content is empty. */
+        .main-wrapper.tab-datamodel-active,
+        .main-wrapper.tab-viz-active {
+          /* For Query / Data Model / Visualization we hide the
+             annotate panels so the alternate view can span the full
+             content width. Wrapper still occupies its slot so the
+             footer stays aligned, but its content is empty. */
           visibility: hidden;
           pointer-events: none;
         }
@@ -3771,6 +4188,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
         <button class="tab active" id="tab-annotate" role="tab" aria-selected="true" aria-controls="view-annotate" data-tab="annotate">Annotate</button>
         <button class="tab" id="tab-query" role="tab" aria-selected="false" aria-controls="view-query" data-tab="query">Query &amp; Analytics</button>
         <button class="tab" id="tab-datamodel" role="tab" aria-selected="false" aria-controls="data-model-view" data-tab="datamodel">Data Model</button>
+        <button class="tab" id="tab-viz" role="tab" aria-selected="false" aria-controls="viz-view" data-tab="viz">Visualization</button>
       </nav>
 
       <div class="main-wrapper">
@@ -5693,9 +6111,17 @@ Annotation Details:
       items: ekphrasisItems,
     };
 
-    const blob = new Blob([JSON.stringify(collection, null, 2)], {
-      type: 'application/ld+json',
-    });
+    // Defensive: replace any residual 'dynamisation' (s) with
+    // 'dynamization' (z) per the GEKO v2 ontology. The internal model
+    // still uses the legacy s-spelling in some classnames/CSS — the
+    // export acts as the spelling boundary. Affects keys (e.g.
+    // 'dynamisation' as a context vocab term that re-compacted) and
+    // values (e.g. a geko:dynamisation IRI). Wrapped to match the
+    // boundary cases only (case-sensitive, no broader matches).
+    let payload = JSON.stringify(collection, null, 2);
+    payload = payload.replace(/dynamisation/g, 'dynamization');
+
+    const blob = new Blob([payload], { type: 'application/ld+json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -5779,29 +6205,46 @@ Annotation Details:
     }
 
     // MLAO Anchor block. Cleans the stamped cache entry into the
-    // export shape. Wikidata target → string IRI (JSON-LD context
-    // declares isAnchoredTo as @type: @id). Custom entity target →
-    // embedded object carrying the entity's type + label so the
-    // export is self-describing (otherwise the entity description
-    // would only live in the RDF graph). hasConceptualLevel is
-    // optional and only emitted when present.
+    // export shape. IRIs are EXPANDED to absolute form (the poster
+    // artefact must be self-describing — no CURIEs leaking out).
+    // Wikidata target → string IRI (JSON-LD context declares
+    // isAnchoredTo as @type: @id). Custom entity target → embedded
+    // object carrying the entity's type + label so the export is
+    // self-describing (otherwise the entity description would only
+    // live in the RDF graph). hasConceptualLevel is optional.
     const a = annotation.hasAnchor;
     if (a && a.isAnchoredTo) {
       const anchorOut = { type: 'Anchor' };
       if (a.isCustomEntity) {
         anchorOut.isAnchoredTo = {
-          id:    a.isAnchoredTo,
-          type:  a.entityClass || 'crm:E1_Entity',
+          id:    this._expandPrefix(a.isAnchoredTo),
+          type:  this._expandPrefix(a.entityClass || 'crm:E1_Entity'),
           ...(a.isAnchoredToLabel ? { label: { en: [a.isAnchoredToLabel] } } : {}),
         };
       } else {
-        anchorOut.isAnchoredTo = a.isAnchoredTo;
+        anchorOut.isAnchoredTo = this._expandPrefix(a.isAnchoredTo);
       }
-      if (a.hasConceptualLevel) anchorOut.hasConceptualLevel = a.hasConceptualLevel;
+      if (a.hasConceptualLevel) {
+        anchorOut.hasConceptualLevel = this._expandPrefix(a.hasConceptualLevel);
+      }
       out.hasAnchor = anchorOut;
     }
 
     return out;
+  }
+
+  /** Expand a `prefix:local` CURIE to its absolute IRI using the
+   *  EXPORT_PREFIX_MAP. Absolute URLs and unknown prefixes pass
+   *  through unchanged so foreign values aren't silently mangled. */
+  _expandPrefix(value) {
+    if (typeof value !== 'string' || !value) return value;
+    if (value.startsWith('http://') || value.startsWith('https://')) return value;
+    const colon = value.indexOf(':');
+    if (colon <= 0) return value;
+    const prefix = value.slice(0, colon);
+    const local  = value.slice(colon + 1);
+    const ns = EXPORT_PREFIX_MAP[prefix];
+    return ns ? ns + local : value;
   }
 
   /** Strip the LRMoo class (`F2_Expression`) from `body.type` for the
