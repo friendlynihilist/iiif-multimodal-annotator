@@ -894,12 +894,12 @@ export class IIIFInterimAnnotator extends HTMLElement {
           <button class="viz-refresh-btn" id="mma-viz-refresh-btn" type="button">Refresh data</button>
         </div>
 
-        <section class="viz-section" data-viz="modalities">
+        <section class="viz-section" data-viz="codex">
           <div class="viz-section-header">
-            <h3 class="viz-section-title">Ekphrastic modalities</h3>
-            <p class="viz-section-sub">How annotations distribute across GEKO modalities.</p>
+            <h3 class="viz-section-title">Codex view — manuscript heat</h3>
+            <p class="viz-section-sub">Annotation density across the manuscript pages. Click a page to inspect.</p>
           </div>
-          <div class="viz-section-body" id="mma-viz-donut">
+          <div class="viz-section-body" id="mma-viz-codex">
             <div class="viz-loading">Loading…</div>
           </div>
         </section>
@@ -914,12 +914,12 @@ export class IIIFInterimAnnotator extends HTMLElement {
           </div>
         </section>
 
-        <section class="viz-section" data-viz="codex">
+        <section class="viz-section" data-viz="modalities">
           <div class="viz-section-header">
-            <h3 class="viz-section-title">Codex view — manuscript heat</h3>
-            <p class="viz-section-sub">Annotation density across the manuscript pages. Click a page to inspect.</p>
+            <h3 class="viz-section-title">Ekphrastic modalities</h3>
+            <p class="viz-section-sub">How annotations distribute across GEKO modalities.</p>
           </div>
-          <div class="viz-section-body" id="mma-viz-codex">
+          <div class="viz-section-body" id="mma-viz-donut">
             <div class="viz-loading">Loading…</div>
           </div>
         </section>
@@ -1162,12 +1162,237 @@ export class IIIFInterimAnnotator extends HTMLElement {
     return best;   // { src, rects } | null
   }
 
-  /** Probe whether a URL looks like a IIIF Image API endpoint. We
-   *  give OSD the source as-is when it does, otherwise fall back to
-   *  treating the URL as a plain raster image. */
-  _looksLikeIiif(url) {
-    return /\/(info\.json|full\/[^\/]+\/0\/default\.(?:jpg|png))?$/.test(url)
-        || /iiif/.test(url);
+  /** Extract the IIIF Image API service IRI from a Presentation
+   *  canvas object. Handles v3 and v2 shapes. Returns null when no
+   *  service is declared (callers should fall back to a static
+   *  <img> tag on /full/max/0/default.jpg). */
+  _extractImageServiceFromCanvas(canvas) {
+    if (!canvas) return null;
+    // IIIF Presentation v3:
+    //   canvas.items[0] (AnnotationPage)
+    //     .items[0] (Annotation, motivation: painting)
+    //       .body (Image)
+    //         .service[0].id  ← here
+    try {
+      const annoPage = canvas.items?.[0];
+      const anno     = annoPage?.items?.[0];
+      const body     = anno?.body;
+      const services = Array.isArray(body?.service) ? body.service
+                     : (body?.service ? [body.service] : []);
+      for (const svc of services) {
+        const id = svc?.id || svc?.['@id'];
+        if (id) return id;
+      }
+      // No service: some v3 manifests inline the image URL as body.id.
+      if (body?.id && !services.length) return body.id;
+    } catch (_) { /* fall through to v2 */ }
+
+    // IIIF Presentation v2:
+    //   canvas.images[0] (oa:Annotation)
+    //     .resource (dctypes:Image)
+    //       .service.@id  ← here
+    try {
+      const image    = canvas.images?.[0];
+      const resource = image?.resource;
+      const svc      = resource?.service;
+      const services = Array.isArray(svc) ? svc : (svc ? [svc] : []);
+      for (const s of services) {
+        const id = s?.['@id'] || s?.id;
+        if (id) return id;
+      }
+      if (resource?.['@id'] || resource?.id) {
+        return resource['@id'] || resource.id;
+      }
+    } catch (_) { /* nothing matched */ }
+    return null;
+  }
+
+  /** Heuristic: derive the manifest URL that contains `canvasIri`.
+   *  Both Europeana and our dl.ficlit demo manifests follow the
+   *  `…/<manifestId>/canvas/<N>` → `…/<manifestId>/manifest` rule. */
+  _manifestUrlFromCanvasIri(canvasIri) {
+    if (!canvasIri) return null;
+    // Strip the trailing /canvas/<...> segment then append /manifest.
+    const m = /^(.+?)\/canvas\/[^?#]+$/.exec(canvasIri);
+    if (m) return `${m[1]}/manifest`;
+    return null;
+  }
+
+  /** Find the canvas object inside a manifest matching `canvasIri`
+   *  (handles v2 and v3). Returns null when not found. */
+  _findCanvasInManifest(manifest, canvasIri) {
+    if (!manifest || !canvasIri) return null;
+    // v3
+    if (Array.isArray(manifest.items)) {
+      for (const c of manifest.items) {
+        if (c.id === canvasIri || c['@id'] === canvasIri) return c;
+      }
+    }
+    // v2
+    if (Array.isArray(manifest.sequences)) {
+      const canvases = manifest.sequences[0]?.canvases || [];
+      for (const c of canvases) {
+        if (c['@id'] === canvasIri || c.id === canvasIri) return c;
+      }
+    }
+    return null;
+  }
+
+  /** Shared OSD prefixUrl. Matches the version pin already used by
+   *  iiif-image-panel so the control icons render uniformly. */
+  _osdPrefixUrl() {
+    return 'https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon/images/';
+  }
+
+  /** Heatmap colormap. Smoothstep-interpolated, museale palette:
+   *  transparent → teal-soft → amber → desat-red → magenta-bordeaux.
+   *  Light theme variant trims 10% off each stop's alpha so the
+   *  underlying image still reads. */
+  _heatmapColorAt(t, isLight) {
+    // Smoothstep cubic for tonal softness, not linear.
+    const smoothstep = (x) => x * x * (3 - 2 * x);
+    const u = smoothstep(Math.max(0, Math.min(1, t)));
+    const stops = isLight ? [
+      [0,   0,   0,   0],
+      [93,  202, 165, Math.round(0.35 * 255 * 0.9)],
+      [240, 170, 90,  Math.round(0.55 * 255 * 0.9)],
+      [220, 80,  80,  Math.round(0.70 * 255 * 0.9)],
+      [180, 50,  90,  Math.round(0.85 * 255 * 0.9)],
+    ] : [
+      [0,   0,   0,   0],
+      [93,  202, 165, Math.round(0.35 * 255)],
+      [240, 170, 90,  Math.round(0.55 * 255)],
+      [220, 80,  80,  Math.round(0.70 * 255)],
+      [180, 50,  90,  Math.round(0.85 * 255)],
+    ];
+    const N = stops.length - 1;
+    const seg = Math.min(N - 1, Math.floor(u * N));
+    const v   = (u * N) - seg;
+    const a   = stops[seg], b = stops[seg + 1];
+    return [
+      a[0] + (b[0] - a[0]) * v,
+      a[1] + (b[1] - a[1]) * v,
+      a[2] + (b[2] - a[2]) * v,
+      a[3] + (b[3] - a[3]) * v,
+    ];
+  }
+
+  /** Build a heatmap canvas at scaled image-pixel resolution from a
+   *  list of {x,y,w,h} rects, apply the museale colormap, and mount
+   *  it as an OSD overlay covering the whole image. Also drops a
+   *  single accent chip ("{N} annotations") over the densest cluster.
+   *
+   *  Wp/Hp = full image pixel dimensions (the OSD content size).
+   *  Returns the chip count for the densest cluster (or 0). */
+  _mountHeatmapOverlay(viewer, OSD, rects, Wp, Hp) {
+    if (!rects?.length || !Wp || !Hp) return 0;
+
+    // Render at image pixel resolution, capped at 2000px on the long
+    // side. The CSS blur below adds another perceptual softness so
+    // the cap doesn't visibly degrade the result.
+    const cap = 2000;
+    const scale = Math.min(1, cap / Math.max(Wp, Hp));
+    const cw = Math.max(1, Math.round(Wp * scale));
+    const ch = Math.max(1, Math.round(Hp * scale));
+
+    const off = document.createElement('canvas');
+    off.width = cw; off.height = ch;
+    const ctx = off.getContext('2d');
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Plot one radial gradient per rect. Radius ~ short-side of the
+    // rect scaled by 1.1 so neighbours feather into one another.
+    for (const r of rects) {
+      const cx = (r.x + r.w / 2) * scale;
+      const cy = (r.y + r.h / 2) * scale;
+      const radius = Math.max(r.w, r.h) * scale * 1.1;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+      g.addColorStop(0,    'rgba(255,255,255,0.85)');
+      g.addColorStop(0.45, 'rgba(255,255,255,0.45)');
+      g.addColorStop(1,    'rgba(255,255,255,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+    }
+
+    // Colormap the accumulated alpha.
+    const isLight = this.getAttribute('data-theme') === 'light';
+    const img = ctx.getImageData(0, 0, cw, ch);
+    const px  = img.data;
+    let maxA = 0;
+    for (let i = 3; i < px.length; i += 4) if (px[i] > maxA) maxA = px[i];
+    if (maxA === 0) maxA = 1;
+    for (let i = 0; i < px.length; i += 4) {
+      const t = px[i + 3] / maxA;
+      const [r, g, b, a] = this._heatmapColorAt(t, isLight);
+      px[i]     = r;
+      px[i + 1] = g;
+      px[i + 2] = b;
+      px[i + 3] = a;
+    }
+    ctx.putImageData(img, 0, 0);
+
+    // CSS-level softness + accent glow on hottest pixels.
+    // mix-blend-mode: screen lets the underlying image breathe
+    // through the cool stops, while still building up to opaque
+    // on the hottest peaks.
+    const accent = (getComputedStyle(this).getPropertyValue('--mma-accent') || '#5dcaa5').trim();
+    off.style.cssText = [
+      'pointer-events:none',
+      'filter:blur(14px) drop-shadow(0 0 6px ' + accent + ')',
+      'opacity:' + (isLight ? 0.45 : 0.55),
+      'mix-blend-mode:screen',
+    ].join(';');
+
+    viewer.addOverlay({
+      element:  off,
+      location: new OSD.Rect(0, 0, 1, Hp / Wp),
+    });
+
+    // Densest-cluster label. For each rect, count how many other
+    // rects centre-overlap with its expanded bounds; pick the
+    // winner. Single label only, so the picture stays clean.
+    let winner = null;
+    let winnerCount = 0;
+    for (let i = 0; i < rects.length; i++) {
+      const a = rects[i];
+      const acx = a.x + a.w / 2, acy = a.y + a.h / 2;
+      let n = 1;
+      for (let j = 0; j < rects.length; j++) {
+        if (j === i) continue;
+        const b = rects[j];
+        const bcx = b.x + b.w / 2, bcy = b.y + b.h / 2;
+        const dx = Math.abs(bcx - acx), dy = Math.abs(bcy - acy);
+        if (dx < Math.max(a.w, b.w) * 0.9 && dy < Math.max(a.h, b.h) * 0.9) n++;
+      }
+      if (n > winnerCount) { winnerCount = n; winner = a; }
+    }
+    if (winner && winnerCount >= 2) {
+      const chip = document.createElement('div');
+      chip.textContent = `${winnerCount} annotations`;
+      chip.style.cssText = [
+        'font-family:"IBM Plex Sans", system-ui, sans-serif',
+        'font-size:11px',
+        'font-weight:500',
+        'letter-spacing:0.02em',
+        'color:var(--mma-text-primary, #ecf0f1)',
+        'background:var(--mma-bg-elevated, #252937)',
+        'border:1px solid var(--mma-accent, #5dcaa5)',
+        'box-shadow:0 0 12px rgba(93,202,165,0.45)',
+        'border-radius:999px',
+        'padding:3px 10px',
+        'white-space:nowrap',
+        'transform:translate(-50%, -120%)',  // centre + lift above the cluster
+        'pointer-events:none',
+      ].join(';');
+      const wcx = (winner.x + winner.w / 2) / Wp;
+      const wcy = (winner.y + winner.h / 2) / Hp * (Hp / Wp);  // viewport y axis
+      viewer.addOverlay({
+        element:  chip,
+        location: new OSD.Point(wcx, wcy),
+        placement: OSD.Placement.CENTER,
+      });
+    }
+    return winnerCount;
   }
 
   /** Heatmap renderer: take the dominant painting source from the
@@ -1211,14 +1436,32 @@ export class IIIFInterimAnnotator extends HTMLElement {
     }
     const OSD = window.OpenSeadragon;
 
-    // Tile source: IIIF info.json if it smells like IIIF, plain
-    // image otherwise (OSD's "image" type for direct rasters).
-    let tileSources;
-    if (this._looksLikeIiif(src)) {
-      tileSources = src.endsWith('/info.json') ? src : `${src.replace(/\/$/, '')}/info.json`;
-    } else {
-      tileSources = { type: 'image', url: src };
+    // Resolve the IIIF Image API service from the canvas. The src
+    // we got from the SPARQL is a Presentation canvas IRI — OSD
+    // needs the Image API endpoint. Fetch the manifest, find the
+    // canvas, extract body.service[0].id (v3) or
+    // images[0].resource.service.@id (v2). On any failure, fall
+    // back to a static <img> so the user at least sees the painting.
+    const manifestUrl = this._manifestUrlFromCanvasIri(src);
+    let serviceId = null;
+    let canvasObj = null;
+    if (manifestUrl) {
+      const manifest = await this._fetchIiifManifest(manifestUrl);
+      canvasObj = this._findCanvasInManifest(manifest, src);
+      serviceId = this._extractImageServiceFromCanvas(canvasObj);
     }
+    if (!serviceId) {
+      // Fallback static image. Better a flat picture than a broken
+      // viewer for the poster.
+      viewerEl.innerHTML = `
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--mma-q-bg-sunken);">
+          <img src="${this._escAttr(src.replace(/\/$/, '') + '/full/1200,/0/default.jpg')}"
+               alt="" style="max-width:100%;max-height:100%;object-fit:contain;"
+               onerror="this.replaceWith(Object.assign(document.createElement('div'), { className:'viz-error', textContent:'Could not resolve painting image service from ${this._escAttr(src)}', style:'padding:24px;' }))" />
+        </div>`;
+      return;
+    }
+    const tileSources = `${serviceId.replace(/\/$/, '')}/info.json`;
 
     // Destroy previous viewer instance on refresh.
     if (this._vizPaintingViewer) {
@@ -1230,6 +1473,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
     try {
       viewer = OSD({
         element: viewerEl,
+        prefixUrl: this._osdPrefixUrl(),
         tileSources,
         showNavigationControl: true,
         showNavigator: false,
@@ -1252,80 +1496,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
         const tiled = viewer.world.getItemAt(0);
         if (!tiled) return;
         const dims = tiled.getContentSize();
-        const W = dims.x, H = dims.y;
-
-        // Build the heatmap canvas at the image's full resolution
-        // (capped to keep memory sane — 2000px max side).
-        const cap = 2000;
-        const scale = Math.min(1, cap / Math.max(W, H));
-        const cw = Math.max(1, Math.round(W * scale));
-        const ch = Math.max(1, Math.round(H * scale));
-
-        const off = document.createElement('canvas');
-        off.width = cw; off.height = ch;
-        const ctx = off.getContext('2d');
-        ctx.globalCompositeOperation = 'lighter';
-
-        // For each region, drop a radial gradient blob centred on
-        // the rect. Blob radius = ~max(width,height)*0.9 in scaled
-        // px so overlapping regions reinforce visibly.
-        for (const r of rects) {
-          const cx = (r.x + r.w / 2) * scale;
-          const cy = (r.y + r.h / 2) * scale;
-          const radius = Math.max(r.w, r.h) * scale * 0.9;
-          const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-          g.addColorStop(0,   'rgba(255,255,255,0.85)');
-          g.addColorStop(0.5, 'rgba(255,255,255,0.35)');
-          g.addColorStop(1,   'rgba(255,255,255,0)');
-          ctx.fillStyle = g;
-          ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
-        }
-
-        // Colormap the intensity (alpha channel) into transparent →
-        // blue → green → yellow → red.
-        const img = ctx.getImageData(0, 0, cw, ch);
-        const px  = img.data;
-        const ramp = (t) => {
-          // 5-stop ramp [transparent, blue, green, yellow, red].
-          const stops = [
-            [0,   0,   0,   0],
-            [80,  140, 255, 110],
-            [80,  220, 130, 170],
-            [240, 215, 60,  220],
-            [240, 80,  60,  240],
-          ];
-          const seg = Math.min(stops.length - 2, Math.floor(t * (stops.length - 1)));
-          const u = (t * (stops.length - 1)) - seg;
-          const a = stops[seg], b = stops[seg + 1];
-          return [
-            a[0] + (b[0] - a[0]) * u,
-            a[1] + (b[1] - a[1]) * u,
-            a[2] + (b[2] - a[2]) * u,
-            a[3] + (b[3] - a[3]) * u,
-          ];
-        };
-        // Find max alpha for normalisation.
-        let maxA = 0;
-        for (let i = 3; i < px.length; i += 4) if (px[i] > maxA) maxA = px[i];
-        if (maxA === 0) maxA = 1;
-        for (let i = 0; i < px.length; i += 4) {
-          const t = px[i + 3] / maxA;
-          const [r, g, b, a] = ramp(t);
-          px[i]     = r;
-          px[i + 1] = g;
-          px[i + 2] = b;
-          px[i + 3] = a;
-        }
-        ctx.putImageData(img, 0, 0);
-
-        // Mount the canvas as an OSD overlay covering the full image.
-        // The viewport rect (0,0,1,H/W) is the canonical "whole image"
-        // rectangle in OSD's normalised viewport coordinates.
-        off.style.opacity = '0.55';
-        viewer.addOverlay({
-          element: off,
-          location: new OSD.Rect(0, 0, 1, H / W),
-        });
+        this._mountHeatmapOverlay(viewer, OSD, rects, dims.x, dims.y);
       } catch (err) {
         console.warn('[Viz] painting heatmap overlay failed', err);
       }
@@ -1540,10 +1711,22 @@ export class IIIFInterimAnnotator extends HTMLElement {
     if (!cellBtn) return;
     const canvasId    = cellBtn.dataset.canvasId;
     const canvasLabel = cellBtn.dataset.canvasLabel || canvasId;
-    const imageBase   = cellBtn.dataset.imageBase;
+    const imageBase   = cellBtn.dataset.imageBase;   // Image API service IRI, set by _renderVizCodex
     const W = parseInt(cellBtn.dataset.canvasWidth,  10) || 0;
     const H = parseInt(cellBtn.dataset.canvasHeight, 10) || 0;
-    if (!imageBase) return;
+    if (!imageBase) {
+      // Without an Image API service we can't open OSD; show a
+      // static image fallback so the user at least sees the page.
+      const host = this._vizViewMount?.querySelector('#mma-viz-codex');
+      const detail = host?.querySelector('#mma-viz-codex-detail');
+      if (detail) {
+        detail.innerHTML = `
+          <div class="viz-error" style="padding:24px;">
+            No IIIF Image API service for canvas ${this._escHtml(canvasId)}.
+          </div>`;
+      }
+      return;
+    }
 
     // Highlight the selected cell, un-highlight any previous one.
     const host = this._vizViewMount?.querySelector('#mma-viz-codex');
@@ -1605,6 +1788,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
     try {
       viewer = OSD({
         element: viewerEl,
+        prefixUrl: this._osdPrefixUrl(),
         tileSources: `${imageBase.replace(/\/$/, '')}/info.json`,
         showNavigationControl: true,
         showNavigator: false,
@@ -1626,71 +1810,8 @@ export class IIIFInterimAnnotator extends HTMLElement {
         const dims = tiled.getContentSize();
         const Wp = W || dims.x;
         const Hp = H || dims.y;
-
         if (rects.length === 0) return;
-
-        // Build canvas at image resolution (capped 2000px).
-        const cap = 2000;
-        const scale = Math.min(1, cap / Math.max(Wp, Hp));
-        const cw = Math.max(1, Math.round(Wp * scale));
-        const ch = Math.max(1, Math.round(Hp * scale));
-        const off = document.createElement('canvas');
-        off.width = cw; off.height = ch;
-        const ctx = off.getContext('2d');
-        ctx.globalCompositeOperation = 'lighter';
-
-        // Line-shaped blobs: horizontal axis = wide gradient bar
-        // because PAGE-XML targets span (most of) the page width.
-        for (const r of rects) {
-          const cx = (r.x + r.w / 2) * scale;
-          const cy = (r.y + r.h / 2) * scale;
-          const rad = Math.max(r.h, r.w * 0.6) * scale;
-          const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
-          g.addColorStop(0,   'rgba(255,255,255,0.85)');
-          g.addColorStop(0.5, 'rgba(255,255,255,0.4)');
-          g.addColorStop(1,   'rgba(255,255,255,0)');
-          ctx.fillStyle = g;
-          ctx.fillRect(cx - rad, cy - rad, rad * 2, rad * 2);
-        }
-
-        const img = ctx.getImageData(0, 0, cw, ch);
-        const px  = img.data;
-        const ramp = (t) => {
-          const stops = [
-            [0,   0,   0,   0],
-            [80,  140, 255, 110],
-            [80,  220, 130, 170],
-            [240, 215, 60,  220],
-            [240, 80,  60,  240],
-          ];
-          const seg = Math.min(stops.length - 2, Math.floor(t * (stops.length - 1)));
-          const u = (t * (stops.length - 1)) - seg;
-          const a = stops[seg], b = stops[seg + 1];
-          return [
-            a[0] + (b[0] - a[0]) * u,
-            a[1] + (b[1] - a[1]) * u,
-            a[2] + (b[2] - a[2]) * u,
-            a[3] + (b[3] - a[3]) * u,
-          ];
-        };
-        let maxA = 0;
-        for (let i = 3; i < px.length; i += 4) if (px[i] > maxA) maxA = px[i];
-        if (maxA === 0) maxA = 1;
-        for (let i = 0; i < px.length; i += 4) {
-          const t = px[i + 3] / maxA;
-          const [r, g, b, a] = ramp(t);
-          px[i]     = r;
-          px[i + 1] = g;
-          px[i + 2] = b;
-          px[i + 3] = a;
-        }
-        ctx.putImageData(img, 0, 0);
-
-        off.style.opacity = '0.55';
-        viewer.addOverlay({
-          element: off,
-          location: new OSD.Rect(0, 0, 1, Hp / Wp),
-        });
+        this._mountHeatmapOverlay(viewer, OSD, rects, Wp, Hp);
       } catch (err) {
         console.warn('[Viz] codex detail heatmap failed', err);
       }
