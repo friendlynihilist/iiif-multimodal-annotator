@@ -851,12 +851,21 @@ export class IIIFInterimAnnotator extends HTMLElement {
         #mma-viz-view .viz-section-header {
           margin-bottom: 16px;
         }
+        /* v4 — section titles read like terminal section headers:
+           ▸ prefix in mono accent, label in uppercase letter-spaced
+           accent. Plays with the dark cyan / light teal accent. */
         #mma-viz-view .viz-section-title {
-          font-family: Spectral, Georgia, serif;
-          font-size: 16px;
+          font-family: 'JetBrains Mono', ui-monospace, monospace;
+          font-size: 12px;
           font-weight: 500;
-          color: var(--mma-q-text-primary);
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: var(--mma-q-accent);
           margin: 0 0 4px;
+        }
+        #mma-viz-view .viz-section-title::before {
+          content: "\\25B8\\00a0";   /* ▸ + nbsp */
+          color: var(--mma-q-accent);
         }
         #mma-viz-view .viz-section-sub {
           font-size: 12px;
@@ -1260,26 +1269,29 @@ export class IIIFInterimAnnotator extends HTMLElement {
     return 'https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon/images/';
   }
 
-  /** Heatmap colormap. Smoothstep-interpolated, museale palette:
-   *  transparent → teal-soft → amber → desat-red → magenta-bordeaux.
-   *  Light theme variant trims 10% off each stop's alpha so the
-   *  underlying image still reads. */
+  /** Heatmap colormap — v4 informatico/terminal palette.
+   *  Dark: electric yellow → orange → magenta → CYAN at the top.
+   *  Light: desaturated equivalents (no glow; the CSS filter on the
+   *  canvas drops drop-shadow in light, see _mountHeatmapOverlay).
+   *  Smoothstep cubic interpolation, alpha rises with intensity. */
   _heatmapColorAt(t, isLight) {
-    // Smoothstep cubic for tonal softness, not linear.
     const smoothstep = (x) => x * x * (3 - 2 * x);
     const u = smoothstep(Math.max(0, Math.min(1, t)));
+    // 5-stop ramp aligned to the 4-tier spec: transparent → tier1 →
+    // tier2 → tier3 → tier4. The colormap is continuous so peaks at
+    // exactly 0.25/0.5/0.75 read as the expected hue.
     const stops = isLight ? [
       [0,   0,   0,   0],
-      [93,  202, 165, Math.round(0.35 * 255 * 0.9)],
-      [240, 170, 90,  Math.round(0.55 * 255 * 0.9)],
-      [220, 80,  80,  Math.round(0.70 * 255 * 0.9)],
-      [180, 50,  90,  Math.round(0.85 * 255 * 0.9)],
+      [200, 160, 0,   Math.round(0.35 * 255)],   // #c8a000 desat yellow
+      [204, 102, 0,   Math.round(0.50 * 255)],   // #cc6600 desat orange
+      [196, 0,   140, Math.round(0.60 * 255)],   // #c4008c magenta
+      [0,   133, 168, Math.round(0.65 * 255)],   // #0085a8 cyan
     ] : [
       [0,   0,   0,   0],
-      [93,  202, 165, Math.round(0.35 * 255)],
-      [240, 170, 90,  Math.round(0.55 * 255)],
-      [220, 80,  80,  Math.round(0.70 * 255)],
-      [180, 50,  90,  Math.round(0.85 * 255)],
+      [255, 215, 0,   Math.round(0.45 * 255)],   // #ffd700 electric yellow
+      [255, 140, 0,   Math.round(0.60 * 255)],   // #ff8c00 orange
+      [255, 0,   180, Math.round(0.75 * 255)],   // #ff00b4 magenta
+      [0,   212, 255, Math.round(0.85 * 255)],   // #00d4ff cyan
     ];
     const N = stops.length - 1;
     const seg = Math.min(N - 1, Math.floor(u * N));
@@ -1369,18 +1381,22 @@ export class IIIFInterimAnnotator extends HTMLElement {
     }
     ctx.putImageData(img, 0, 0);
 
-    // CSS-level softness. Radial mode gets a fatter blur + accent
-    // glow ("smoke" feel); bands mode gets a tighter blur so the
-    // line shape stays legible (otherwise neighbours smear into a
-    // continuous bar).
-    const accent = (getComputedStyle(this).getPropertyValue('--mma-accent') || '#5dcaa5').trim();
-    const filter = mode === 'bands'
-      ? 'blur(6px)'
-      : 'blur(14px) drop-shadow(0 0 6px ' + accent + ')';
+    // CSS-level softness. Radial mode gets a fatter blur + cyan
+    // drop-shadow glow ("hot terminal" feel) only in dark; bands
+    // mode gets a tight blur so line shapes stay legible. Light
+    // theme strips the glow entirely — the desaturated colormap
+    // already reads cleanly without it.
+    const accent = (getComputedStyle(this).getPropertyValue('--mma-accent') || '#00d4ff').trim();
+    let filter;
+    if (mode === 'bands') {
+      filter = isLight ? 'blur(2px)' : 'blur(4px) drop-shadow(0 0 4px ' + accent + ')';
+    } else {
+      filter = isLight ? 'blur(12px)' : 'blur(14px) drop-shadow(0 0 6px ' + accent + ')';
+    }
     off.style.cssText = [
       'pointer-events:none',
       'filter:' + filter,
-      'opacity:' + (isLight ? 0.45 : 0.55),
+      'opacity:' + (isLight ? 0.55 : 0.7),
       'mix-blend-mode:screen',
     ].join(';');
 
@@ -1693,46 +1709,78 @@ export class IIIFInterimAnnotator extends HTMLElement {
       bandsByCanvas.get(src).push(rect);
     }
 
-    // Page-intensity → 4-tier palette (FIX 3 spec).
+    // Are we in light theme? Glow only on dark; light gets the
+    // desaturated equivalents.
+    const isLight = (document.documentElement.getAttribute('data-mma-theme') === 'light');
+
+    // Page-intensity → 4-tier palette (v4 spec). Returns
+    // { fill, solid, glow } so bands get the translucent fill,
+    // badges/borders the solid colour, dark thumbs the glow.
     const tierColour = (intensity) => {
       if (intensity <= 0)    return null;
-      if (intensity <= 0.25) return 'rgba(245,200,90,0.35)';   // low — amber soft
-      if (intensity <= 0.5)  return 'rgba(220,140,60,0.45)';   // medium — amber
-      if (intensity <= 0.75) return 'rgba(200,80,100,0.5)';    // high — terracotta
-      return                        'rgba(180,40,80,0.55)';    // very high — bordeaux
+      const dark = isLight ? [
+        { fill: 'rgba(200,160,0,0.35)',   solid: '#c8a000' },   // low
+        { fill: 'rgba(204,102,0,0.50)',   solid: '#cc6600' },   // medium
+        { fill: 'rgba(196,0,140,0.55)',   solid: '#c4008c' },   // high
+        { fill: 'rgba(0,133,168,0.60)',   solid: '#0085a8' },   // very high
+      ] : [
+        { fill: 'rgba(255,215,0,0.55)',   solid: '#ffd700' },   // low
+        { fill: 'rgba(255,140,0,0.65)',   solid: '#ff8c00' },   // medium
+        { fill: 'rgba(255,0,180,0.65)',   solid: '#ff00b4' },   // high
+        { fill: 'rgba(0,212,255,0.70)',   solid: '#00d4ff' },   // very high
+      ];
+      const idx = intensity <= 0.25 ? 0
+                : intensity <= 0.5  ? 1
+                : intensity <= 0.75 ? 2 : 3;
+      return dark[idx];
     };
 
     gridEl.innerHTML = canvases.map((c, i) => {
       const n = countByCanvas.get(c.id) || 0;
       const intensity = maxCount > 0 ? (n / maxCount) : 0;
-      const colour = tierColour(intensity) || 'transparent';
+      const tier = tierColour(intensity);
+      const fill  = tier?.fill  || 'transparent';
+      const solid = tier?.solid || 'transparent';
+      const isVeryHigh = intensity > 0.75 && n > 0;
       const label = c.label || `Canvas ${i + 1}`;
       const tooltip = `Page ${label} — ${n} annotation${n === 1 ? '' : 's'}`;
       const W = c.width  || 0;
       const H = c.height || 0;
       const rects = bandsByCanvas.get(c.id) || [];
 
-      // Stringified band overlays in PERCENT units so they track the
-      // thumbnail's container regardless of its rendered pixel size.
+      // Band overlays in PERCENT units so they track the thumbnail
+      // container. Dark theme adds a slim glow per band for the
+      // "terminal" feel; light stays sharp + clean.
       const bandsHtml = (W > 0 && H > 0 && rects.length)
         ? rects.map((r) => {
             const left = ((r.x) / W * 100).toFixed(2);
             const top  = ((r.y) / H * 100).toFixed(2);
             const w    = ((r.w) / W * 100).toFixed(2);
             const h    = ((r.h) / H * 100).toFixed(2);
-            return `<div class="viz-codex-band" style="position:absolute;left:${left}%;top:${top}%;width:${w}%;height:${h}%;background:${colour};pointer-events:none;"></div>`;
+            const glow = isLight ? '' : `box-shadow:0 0 4px ${solid};`;
+            return `<div class="viz-codex-band" style="position:absolute;left:${left}%;top:${top}%;width:${w}%;height:${h}%;background:${fill};${glow}pointer-events:none;"></div>`;
           }).join('')
         : '';
 
+      // Mono badge, intensity-coloured border. Dark = subtle glow.
+      const badgeGlow = !isLight && tier ? `box-shadow:0 0 4px ${solid};` : '';
+      const badgeBg   = isLight ? 'var(--mma-bg-elevated)' : 'var(--mma-bg-base)';
       const badge = n > 0
-        ? `<div class="viz-codex-badge" style="position:absolute;top:6px;right:6px;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:10px;font-weight:500;color:var(--mma-q-text-primary);background:var(--mma-q-bg-elevated);border:1px solid ${colour.replace(/,[\d.]+\)$/, ',0.8)')};border-radius:999px;padding:2px 7px;line-height:1.2;pointer-events:none;">${n}</div>`
+        ? `<div class="viz-codex-badge" style="position:absolute;top:6px;right:6px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.02em;color:var(--mma-text-primary);background:${badgeBg};border:1px solid ${solid};${badgeGlow}border-radius:999px;padding:2px 7px;line-height:1.2;pointer-events:none;">${n}</div>`
         : '';
 
-      // Bottom page label + gradient.
+      // Bottom page label — mono cyan/accent. Sits over a thin black
+      // gradient so it reads on any thumb.
+      const labelColor = isLight ? 'var(--mma-accent)' : '#00d4ff';
       const bottomLabel = `
-        <div style="position:absolute;left:0;right:0;bottom:0;padding:14px 8px 6px;background:linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0));pointer-events:none;">
-          <span style="font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:9px;font-weight:500;letter-spacing:0.05em;color:#ffffff;text-shadow:0 1px 2px rgba(0,0,0,0.5);">${this._escHtml(label)}</span>
+        <div style="position:absolute;left:0;right:0;bottom:0;padding:14px 8px 6px;background:linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0));pointer-events:none;">
+          <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:500;letter-spacing:0.05em;color:${labelColor};text-shadow:0 1px 2px rgba(0,0,0,0.6);">${this._escHtml(label)}</span>
         </div>`;
+
+      // Very-high thumbs get a magenta glow ring (dark only).
+      const cellGlow = (isVeryHigh && !isLight)
+        ? 'box-shadow:0 0 12px rgba(255,0,180,0.25);'
+        : '';
 
       // Image source: imageApi → derivative; staticImage → URL.
       let imageUrl = '';
@@ -1755,7 +1803,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
                 data-canvas-height="${H}"
                 data-annotation-count="${n}"
                 title="${this._escAttr(tooltip)}"
-                style="background:transparent;border:1px solid var(--mma-q-border-soft);border-radius:6px;padding:0;cursor:pointer;display:flex;flex-direction:column;overflow:hidden;transition:transform 0.12s ease, border-color 0.12s ease;">
+                style="background:transparent;border:1px solid var(--mma-q-border-soft);border-radius:6px;padding:0;cursor:pointer;display:flex;flex-direction:column;overflow:hidden;${cellGlow}transition:transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;">
           <div class="viz-codex-thumb" data-pending="1" data-image-url="${this._escAttr(imageUrl)}"
                style="position:relative;width:100%;aspect-ratio:3/4;background:var(--mma-q-bg-sunken);">
             ${bandsHtml}
@@ -1811,15 +1859,19 @@ export class IIIFInterimAnnotator extends HTMLElement {
       btn.addEventListener('click', () => this._openCodexDetail(btn));
     });
 
-    // Legend under the grid.
+    // Legend under the grid — same 4-tier palette as the bands.
+    const legendStops = isLight
+      ? ['#c8a000', '#cc6600', '#c4008c', '#0085a8']
+      : ['#ffd700', '#ff8c00', '#ff00b4', '#00d4ff'];
+    const swatch = (c) => `<span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:10px;border-radius:2px;background:${c};${isLight ? '' : 'box-shadow:0 0 4px ' + c}"></span>`;
     const legend = document.createElement('div');
-    legend.style.cssText = 'margin-top:16px;display:flex;align-items:center;gap:14px;font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:10px;letter-spacing:0.04em;color:var(--mma-q-text-faint);';
+    legend.style.cssText = 'margin-top:16px;display:flex;align-items:center;gap:16px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:0.04em;color:var(--mma-q-text-faint);text-transform:uppercase;';
     legend.innerHTML = `
       <span>Density</span>
-      <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:10px;border-radius:2px;background:rgba(245,200,90,0.7);"></span>low</span>
-      <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:10px;border-radius:2px;background:rgba(220,140,60,0.8);"></span>medium</span>
-      <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:10px;border-radius:2px;background:rgba(200,80,100,0.85);"></span>high</span>
-      <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:10px;border-radius:2px;background:rgba(180,40,80,0.9);"></span>very high</span>
+      ${swatch(legendStops[0])}low</span>
+      ${swatch(legendStops[1])}medium</span>
+      ${swatch(legendStops[2])}high</span>
+      ${swatch(legendStops[3])}very high</span>
     `;
     gridEl.insertAdjacentElement('afterend', legend);
   }
@@ -2049,37 +2101,41 @@ export class IIIFInterimAnnotator extends HTMLElement {
            theme attribute is mirrored to <html> by _setTheme(), so
            toggling dark↔light re-paints both worlds in lockstep. */
         :root {
-          --mma-q-bg-base:      #1f2330;
-          --mma-q-bg-elevated:  #252937;
-          --mma-q-bg-sunken:    #14171f;
-          --mma-q-border:       rgba(255,255,255,0.08);
-          --mma-q-border-soft:  rgba(255,255,255,0.06);
-          --mma-q-text-primary: #ecf0f1;
-          --mma-q-text-body:    #d8dce5;
-          --mma-q-text-muted:   #b0b6c2;
-          --mma-q-text-label:   #a8aeba;
-          --mma-q-text-faint:   #7a8194;
-          --mma-q-accent:       #5dcaa5;
-          --mma-q-accent-ring:  rgba(93,202,165,0.35);
-          --mma-q-accent-ink:   #0e2920;
-          --mma-q-accent-bg:    rgba(93,202,165,0.18);
-          --mma-q-row-hover:    rgba(255,255,255,0.03);
+          --mma-q-bg-base:      #0a0e1a;
+          --mma-q-bg-elevated:  #0d1320;
+          --mma-q-bg-sunken:    #060912;
+          --mma-q-border:       rgba(255,255,255,0.06);
+          --mma-q-border-soft:  rgba(255,255,255,0.04);
+          --mma-q-text-primary: #e6f4ff;
+          --mma-q-text-body:    #c4d4e8;
+          --mma-q-text-muted:   #a0aec0;
+          --mma-q-text-label:   #8a9cb8;
+          --mma-q-text-faint:   #6b7a96;
+          --mma-q-accent:       #00d4ff;
+          --mma-q-accent-ring:  rgba(0,212,255,0.4);
+          --mma-q-accent-ink:   #001824;
+          --mma-q-accent-bg:    rgba(0,212,255,0.08);
+          --mma-q-magenta:      #ff00b4;
+          --mma-q-magenta-bg:   rgba(255,0,180,0.08);
+          --mma-q-row-hover:    rgba(0,212,255,0.04);
         }
         :root[data-mma-theme="light"] {
-          --mma-q-bg-base:      #f8f7f3;
+          --mma-q-bg-base:      #f4f6fb;
           --mma-q-bg-elevated:  #ffffff;
-          --mma-q-bg-sunken:    #ebe9e2;
-          --mma-q-border:       rgba(0,0,0,0.07);
-          --mma-q-border-soft:  rgba(0,0,0,0.05);
-          --mma-q-text-primary: #1a1e28;
-          --mma-q-text-body:    #2a2e38;
-          --mma-q-text-muted:   #4a4f5c;
-          --mma-q-text-label:   #5a6070;
-          --mma-q-text-faint:   #6f7382;
-          --mma-q-accent:       #2a8169;
-          --mma-q-accent-ring:  rgba(42,129,105,0.35);
+          --mma-q-bg-sunken:    #e8ecf3;
+          --mma-q-border:       rgba(0,0,0,0.06);
+          --mma-q-border-soft:  rgba(0,0,0,0.04);
+          --mma-q-text-primary: #0a1628;
+          --mma-q-text-body:    #1a2638;
+          --mma-q-text-muted:   #3a4458;
+          --mma-q-text-label:   #4a5870;
+          --mma-q-text-faint:   #5e6b85;
+          --mma-q-accent:       #0085a8;
+          --mma-q-accent-ring:  rgba(0,133,168,0.4);
           --mma-q-accent-ink:   #ffffff;
-          --mma-q-accent-bg:    rgba(42,129,105,0.16);
+          --mma-q-accent-bg:    rgba(0,133,168,0.06);
+          --mma-q-magenta:      #c4008c;
+          --mma-q-magenta-bg:   rgba(196,0,140,0.06);
           --mma-q-row-hover:    rgba(0,0,0,0.03);
         }
         #mma-query-view {
@@ -3348,31 +3404,33 @@ export class IIIFInterimAnnotator extends HTMLElement {
           --mma-font-sans:  'IBM Plex Sans', system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
           --mma-font-serif: Spectral, Georgia, "Times New Roman", serif;
 
-          /* ── DARK palette (default) ── */
-          --mma-bg-base:      #1f2330;
-          --mma-bg-elevated:  #252937;
-          --mma-bg-sunken:    #14171f;
-          --mma-surface-soft: rgba(255,255,255,0.05);
-          --mma-surface-hover:rgba(255,255,255,0.09);
-          --mma-border:       rgba(255,255,255,0.08);
-          --mma-border-soft:  rgba(255,255,255,0.06);
-          --mma-divider:      rgba(255,255,255,0.15);
-          --mma-text-primary: #ecf0f1;
-          --mma-text-body:    #d8dce5;
-          --mma-text-muted:   #b0b6c2;
-          --mma-text-label:   #a8aeba;
-          --mma-text-faint:   #7a8194;
-          --mma-accent:       #5dcaa5;
-          --mma-accent-ink:   #0e2920;
-          --mma-accent-bg:    rgba(93,202,165,0.18);
-          --mma-accent-border:rgba(93,202,165,0.35);
-          --mma-row-hover:    rgba(255,255,255,0.03);
-          --mma-backdrop:     rgba(0,0,0,0.5);
+          /* ── DARK palette (v4 — informatico/terminal) ── */
+          --mma-bg-base:      #0a0e1a;
+          --mma-bg-elevated:  #0d1320;
+          --mma-bg-sunken:    #060912;
+          --mma-surface-soft: rgba(255,255,255,0.04);
+          --mma-surface-hover:rgba(255,255,255,0.07);
+          --mma-border:       rgba(255,255,255,0.06);
+          --mma-border-soft:  rgba(255,255,255,0.04);
+          --mma-divider:      rgba(0,212,255,0.25);
+          --mma-text-primary: #e6f4ff;
+          --mma-text-body:    #c4d4e8;
+          --mma-text-muted:   #a0aec0;
+          --mma-text-label:   #8a9cb8;
+          --mma-text-faint:   #6b7a96;
+          --mma-accent:       #00d4ff;
+          --mma-accent-ink:   #001824;
+          --mma-accent-bg:    rgba(0,212,255,0.08);
+          --mma-accent-border:rgba(0,212,255,0.4);
+          --mma-magenta:      #ff00b4;
+          --mma-magenta-bg:   rgba(255,0,180,0.08);
+          --mma-row-hover:    rgba(0,212,255,0.04);
+          --mma-backdrop:     rgba(0,0,0,0.6);
 
-          /* Modality tokens — re-pointed for v3 */
-          --mma-mod-denotation:   #5dcaa5;
-          --mma-mod-dynamization: #7da9d6;
-          --mma-mod-integration:  #d09b7a;
+          /* Modality tokens — v4 cyan/magenta/orange */
+          --mma-mod-denotation:   #00d4ff;
+          --mma-mod-dynamization: #ff00b4;
+          --mma-mod-integration:  #ff8c00;
 
           /* Back-compat aliases (legacy names still used across this
              file and child components — keep them pointing at the new
@@ -3407,29 +3465,31 @@ export class IIIFInterimAnnotator extends HTMLElement {
         /* ── LIGHT palette ── re-points every token; the rules below
            don't need to know which theme is active. */
         :host([data-theme="light"]) {
-          --mma-bg-base:      #f8f7f3;   /* avorio tenue, NOT pure white */
+          --mma-bg-base:      #f4f6fb;
           --mma-bg-elevated:  #ffffff;
-          --mma-bg-sunken:    #ebe9e2;
+          --mma-bg-sunken:    #e8ecf3;
           --mma-surface-soft: rgba(0,0,0,0.04);
           --mma-surface-hover:rgba(0,0,0,0.06);
-          --mma-border:       rgba(0,0,0,0.07);
-          --mma-border-soft:  rgba(0,0,0,0.05);
-          --mma-divider:      rgba(0,0,0,0.15);
-          --mma-text-primary: #1a1e28;
-          --mma-text-body:    #2a2e38;
-          --mma-text-muted:   #4a4f5c;
-          --mma-text-label:   #5a6070;
-          --mma-text-faint:   #6f7382;
-          --mma-accent:       #2a8169;
+          --mma-border:       rgba(0,0,0,0.06);
+          --mma-border-soft:  rgba(0,0,0,0.04);
+          --mma-divider:      rgba(0,0,0,0.2);
+          --mma-text-primary: #0a1628;
+          --mma-text-body:    #1a2638;
+          --mma-text-muted:   #3a4458;
+          --mma-text-label:   #4a5870;
+          --mma-text-faint:   #5e6b85;
+          --mma-accent:       #0085a8;
           --mma-accent-ink:   #ffffff;
-          --mma-accent-bg:    rgba(42,129,105,0.16);
-          --mma-accent-border:rgba(42,129,105,0.35);
+          --mma-accent-bg:    rgba(0,133,168,0.06);
+          --mma-accent-border:rgba(0,133,168,0.4);
+          --mma-magenta:      #c4008c;
+          --mma-magenta-bg:   rgba(196,0,140,0.06);
           --mma-row-hover:    rgba(0,0,0,0.03);
           --mma-backdrop:     rgba(0,0,0,0.3);
 
-          --mma-mod-denotation:   #2a8169;
-          --mma-mod-dynamization: #4a7aa3;
-          --mma-mod-integration:  #a26b48;
+          --mma-mod-denotation:   #0085a8;
+          --mma-mod-dynamization: #c4008c;
+          --mma-mod-integration:  #cc6600;
         }
 
         .app-header {
