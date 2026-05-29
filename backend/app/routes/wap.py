@@ -365,10 +365,24 @@ async def create_annotation_anchor(
 
     fuseki = get_client()
 
-    # 404 if the annotation graph doesn't exist.
-    if not await fuseki.graph_exists(iri):
-        raise HTTPException(status_code=404,
-                            detail=f"No annotation at {iri} to anchor.")
+    # Use construct_graph (same path GET uses) for the existence
+    # check — if GET works for this annotation, this MUST too. Log
+    # the exact IRI we're querying so a 404 here can be cross-checked
+    # against Fuseki manually (ASK { GRAPH <...> { ?s ?p ?o } }).
+    existing_nt = await fuseki.construct_graph(iri)
+    log.info("[anchor] looking up annotation graph %s (got %d bytes)",
+             iri, len(existing_nt or ""))
+    if not existing_nt or not existing_nt.strip():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No annotation at {iri} to anchor. "
+                f"Container={container!r} id={annotation_id!r}. "
+                "Verify that GET /w3c/{container}/{id} returns the "
+                "annotation; if it does, the route is reaching a "
+                "different Fuseki than the one the WAP routes use."
+            ),
+        )
 
     # Build the anchor triples in a fresh Graph, then serialize as NT.
     # The SPARQL Update below does DELETE-old + INSERT-new in a single

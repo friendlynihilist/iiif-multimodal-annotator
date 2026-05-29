@@ -59,7 +59,7 @@ function shortMessage(op, error) {
   return `${op} failed: ${error?.message || "unknown error"}`;
 }
 
-function iriToContainerAndId(iri) {
+export function iriToContainerAndId(iri) {
   // Backend responses serialise IRIs in CURIE-compact form (`mma:…`)
   // via JSON-LD compaction; URL routing needs the absolute http form.
   // Normalise first so the regex below works for either input shape.
