@@ -137,12 +137,31 @@ export class IIIFInterimAnnotator extends HTMLElement {
     }
     // Swap icon if the button is already rendered (i.e. after first render).
     const btn = this.shadowRoot?.getElementById('theme-toggle-btn');
-    if (!btn) return;
+    if (!btn) {
+      this._repaintViz();
+      return;
+    }
     const sun  = btn.querySelector('.theme-icon-sun');
     const moon = btn.querySelector('.theme-icon-moon');
     if (sun)  sun.style.display  = theme === 'dark'  ? '' : 'none';
     if (moon) moon.style.display = theme === 'light' ? '' : 'none';
     btn.setAttribute('aria-label', theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+
+    // Viz components draw glow/tier colours from the active theme.
+    // HTML overlays use var() and re-paint reactively; canvas
+    // bitmaps (donut chart, heatmap overlays) need an explicit
+    // re-render. Skip if the viz tab was never opened.
+    this._repaintViz();
+  }
+
+  /** Re-render the Visualization tab's canvas-bitmap surfaces after
+   *  a theme swap. HTML overlays already re-paint via var() and don't
+   *  need this. Noop when the data hasn't been loaded yet. */
+  _repaintViz() {
+    if (!this._vizDataCache) return;
+    try { this._renderVizModalities?.(); } catch (_) {}
+    try { this._renderVizCodex?.(); }      catch (_) {}
+    try { this._renderVizPainting?.(); }   catch (_) {}
   }
 
   /** Flip dark↔light and persist. Wired to the header's toggle button. */
@@ -890,6 +909,46 @@ export class IIIFInterimAnnotator extends HTMLElement {
           color: #d77a72;
           font-style: normal;
         }
+        /* Museale-style desaturation on the OSD tilesource canvas so
+           the heatmap overlay reads. Targets only the tilesource
+           canvas (.openseadragon-canvas direct child) — the overlay
+           container that holds our heatmap is a sibling, unaffected. */
+        #mma-viz-painting-viewer .openseadragon-canvas canvas,
+        #mma-viz-codex-detail-viewer .openseadragon-canvas canvas {
+          filter: grayscale(0.85) brightness(0.7);
+          transition: filter 0.2s ease;
+        }
+        #mma-viz-painting-viewer.color-mode .openseadragon-canvas canvas {
+          filter: none;
+        }
+        /* Color-image toggle on the painting viewer */
+        .viz-color-toggle {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          z-index: 10;
+          height: 26px;
+          padding: 0 12px;
+          background: var(--mma-q-bg-elevated);
+          color: var(--mma-q-text-body);
+          border: 1px solid var(--mma-q-border);
+          border-radius: 999px;
+          cursor: pointer;
+          font-family: 'JetBrains Mono', ui-monospace, monospace;
+          font-size: 10.5px;
+          font-weight: 500;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+        .viz-color-toggle:hover {
+          color: var(--mma-q-accent);
+          border-color: var(--mma-q-accent-ring);
+        }
+        .viz-color-toggle.active {
+          background: var(--mma-q-accent-bg);
+          color: var(--mma-q-accent);
+          border-color: var(--mma-q-accent);
+        }
       `;
       document.head.appendChild(style);
     }
@@ -1083,20 +1142,21 @@ export class IIIFInterimAnnotator extends HTMLElement {
     }
 
     const colours = this._modalityColours();
-    const textBody  = (getComputedStyle(this).getPropertyValue('--mma-text-body') || '#d8dce5').trim();
-    const textFaint = (getComputedStyle(this).getPropertyValue('--mma-text-faint') || '#7a8194').trim();
 
-    // Replace placeholder with chart + legend layout.
+    // HTML overlays + legend use var() directly so theme toggle
+    // re-paints them without re-rendering. Chart.js canvas pulls
+    // its glow + tooltip colours from computed styles below — we
+    // re-render the chart on theme change so those stay in sync.
     host.innerHTML = `
       <div class="viz-donut-wrap" style="display:flex;align-items:center;gap:32px;flex-wrap:wrap;">
         <div class="viz-donut-canvas-wrap" style="position:relative;width:240px;height:240px;flex-shrink:0;">
           <canvas id="mma-viz-donut-canvas" width="240" height="240"></canvas>
           <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">
-            <div style="font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:500;color:${textBody};">${total}</div>
-            <div style="font-size:10.5px;letter-spacing:0.14em;text-transform:uppercase;color:${textFaint};margin-top:2px;">annotations</div>
+            <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:34px;font-weight:600;line-height:1;color:var(--mma-q-text-primary);">${total}</div>
+            <div style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;letter-spacing:0.18em;text-transform:uppercase;color:var(--mma-q-text-faint);margin-top:6px;">annotations</div>
           </div>
         </div>
-        <ul class="viz-donut-legend" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;font-size:13px;color:${textBody};">
+        <ul class="viz-donut-legend" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--mma-q-text-body);">
           ${[
             { slot: 'denotation',   label: 'Denotation'   },
             { slot: 'dynamization', label: 'Dynamization' },
@@ -1106,10 +1166,10 @@ export class IIIFInterimAnnotator extends HTMLElement {
             const pct = total ? Math.round((n / total) * 100) : 0;
             return `
               <li style="display:flex;align-items:center;gap:12px;">
-                <span style="width:14px;height:14px;border-radius:50%;background:${colours[slot]};flex-shrink:0;"></span>
-                <span style="min-width:130px;">${label}</span>
-                <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${textBody};">${n}</span>
-                <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${textFaint};">${pct}%</span>
+                <span style="width:12px;height:12px;border-radius:50%;background:${colours[slot]};flex-shrink:0;box-shadow:0 0 6px ${colours[slot]};"></span>
+                <span style="min-width:130px;color:var(--mma-q-text-body);">${label}</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:600;color:var(--mma-q-text-primary);min-width:32px;text-align:right;">${n}</span>
+                <span style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:var(--mma-q-text-faint);min-width:44px;">${pct}%</span>
               </li>`;
           }).join('')}
         </ul>
@@ -1120,6 +1180,16 @@ export class IIIFInterimAnnotator extends HTMLElement {
     // Destroy a previous chart instance if we're re-rendering on
     // refresh — Chart.js complains otherwise.
     if (this._donutChart) { try { this._donutChart.destroy(); } catch (_) {} }
+
+    // Tooltip colours pulled from the current theme tokens (read at
+    // chart-build time; _setTheme re-invokes _renderVizModalities
+    // on toggle so they refresh).
+    const cs = getComputedStyle(this);
+    const bgElev = (cs.getPropertyValue('--mma-bg-elevated') || '#0d1320').trim();
+    const txtP   = (cs.getPropertyValue('--mma-text-primary') || '#e6f4ff').trim();
+    const txtB   = (cs.getPropertyValue('--mma-text-body')    || '#c4d4e8').trim();
+    const border = (cs.getPropertyValue('--mma-border')       || 'rgba(255,255,255,0.06)').trim();
+
     this._donutChart = new Chart(canvas.getContext('2d'), {
       type: 'doughnut',
       data: {
@@ -1127,18 +1197,18 @@ export class IIIFInterimAnnotator extends HTMLElement {
         datasets: [{
           data: [buckets.denotation, buckets.dynamization, buckets.integration],
           backgroundColor: [colours.denotation, colours.dynamization, colours.integration],
-          borderColor: 'transparent',
-          borderWidth: 0,
+          borderColor: bgElev,
+          borderWidth: 2,
           hoverOffset: 6,
         }],
       },
       options: {
         responsive: false,
-        cutout: '68%',
+        cutout: '70%',
         plugins: { legend: { display: false }, tooltip: {
-          backgroundColor: '#1f2330',
-          titleColor: '#ecf0f1', bodyColor: '#d8dce5',
-          borderColor: 'rgba(255,255,255,0.08)', borderWidth: 1,
+          backgroundColor: bgElev,
+          titleColor: txtP, bodyColor: txtB,
+          borderColor: border, borderWidth: 1,
           padding: 10, cornerRadius: 6,
         } },
         animation: { duration: 600, easing: 'easeOutQuart' },
@@ -1388,15 +1458,21 @@ export class IIIFInterimAnnotator extends HTMLElement {
     // already reads cleanly without it.
     const accent = (getComputedStyle(this).getPropertyValue('--mma-accent') || '#00d4ff').trim();
     let filter;
+    let opacity;
     if (mode === 'bands') {
-      filter = isLight ? 'blur(2px)' : 'blur(4px) drop-shadow(0 0 4px ' + accent + ')';
+      filter  = isLight ? 'blur(2px)' : 'blur(4px) drop-shadow(0 0 4px ' + accent + ')';
+      opacity = isLight ? 0.7 : 0.85;
     } else {
-      filter = isLight ? 'blur(12px)' : 'blur(14px) drop-shadow(0 0 6px ' + accent + ')';
+      // Radial (painting). With the underlying tilesource desaturated
+      // by CSS, the heatmap can go to full opacity and read as
+      // luminous colour on grey rather than fighting the picture.
+      filter  = isLight ? 'blur(12px)' : 'blur(14px) drop-shadow(0 0 8px ' + accent + ')';
+      opacity = isLight ? 0.7 : 0.9;
     }
     off.style.cssText = [
       'pointer-events:none',
       'filter:' + filter,
-      'opacity:' + (isLight ? 0.55 : 0.7),
+      'opacity:' + opacity,
       'mix-blend-mode:screen',
     ].join(';');
 
@@ -1469,15 +1545,29 @@ export class IIIFInterimAnnotator extends HTMLElement {
     }
     const { src, rects } = dominant;
 
-    // Lay out: source label + viewer area.
+    // Lay out: source label + viewer area + color-image toggle.
     host.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;gap:14px;">
         <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mma-q-text-faint);word-break:break-all;">${this._escHtml(src)}</span>
         <span style="font-size:11px;color:var(--mma-q-text-muted);">${rects.length} region${rects.length === 1 ? '' : 's'}</span>
       </div>
-      <div id="mma-viz-painting-viewer" style="position:relative;width:100%;height:480px;background:var(--mma-q-bg-sunken);border:1px solid var(--mma-q-border-soft);border-radius:8px;overflow:hidden;"></div>
+      <div id="mma-viz-painting-viewer" style="position:relative;width:100%;height:480px;background:var(--mma-q-bg-sunken);border:1px solid var(--mma-q-border-soft);border-radius:8px;overflow:hidden;">
+        <button class="viz-color-toggle" id="mma-viz-painting-color-toggle" type="button" aria-pressed="false" title="Show painting at natural saturation (heatmap will be harder to read)">Color image</button>
+      </div>
     `;
     const viewerEl = host.querySelector('#mma-viz-painting-viewer');
+    // Wire the color-image toggle. Default = desaturated (so the
+    // heatmap pops). Click flips a class on the viewer wrapper that
+    // the CSS rule above keys off.
+    const colorToggle = host.querySelector('#mma-viz-painting-color-toggle');
+    if (colorToggle) {
+      colorToggle.addEventListener('click', () => {
+        const on = viewerEl.classList.toggle('color-mode');
+        colorToggle.classList.toggle('active', on);
+        colorToggle.setAttribute('aria-pressed', String(on));
+        colorToggle.textContent = on ? 'Desaturate' : 'Color image';
+      });
+    }
 
     // Ensure OSD is available. The annotator already imports it via
     // the panel components; reuse window.OpenSeadragon.
@@ -1762,11 +1852,11 @@ export class IIIFInterimAnnotator extends HTMLElement {
           }).join('')
         : '';
 
-      // Mono badge, intensity-coloured border. Dark = subtle glow.
-      const badgeGlow = !isLight && tier ? `box-shadow:0 0 4px ${solid};` : '';
-      const badgeBg   = isLight ? 'var(--mma-bg-elevated)' : 'var(--mma-bg-base)';
+      // Solid badge — bright tier colour filled, dark ink, mono.
+      // Dark theme adds a halo glow so the chip pops on near-black.
+      const badgeGlow = (!isLight && tier) ? `box-shadow:0 0 6px ${solid};` : '';
       const badge = n > 0
-        ? `<div class="viz-codex-badge" style="position:absolute;top:6px;right:6px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.02em;color:var(--mma-text-primary);background:${badgeBg};border:1px solid ${solid};${badgeGlow}border-radius:999px;padding:2px 7px;line-height:1.2;pointer-events:none;">${n}</div>`
+        ? `<div class="viz-codex-badge" style="position:absolute;top:6px;right:6px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:700;letter-spacing:0.02em;color:var(--mma-q-bg-base);background:${solid};${badgeGlow}border:none;border-radius:999px;padding:3px 7px;line-height:1.2;pointer-events:none;">${n}</div>`
         : '';
 
       // Bottom page label — mono cyan/accent. Sits over a thin black
