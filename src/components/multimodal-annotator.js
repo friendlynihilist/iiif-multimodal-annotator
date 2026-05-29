@@ -1136,13 +1136,570 @@ export class IIIFInterimAnnotator extends HTMLElement {
       },
     });
   }
+  /** Parse an "xywh=x,y,w,h" Media Fragment selector value into a
+   *  rect object. Returns null on malformed input. */
+  _parseXywh(s) {
+    const m = /xywh=(?:pixel:)?(\d+),(\d+),(\d+),(\d+)/.exec(String(s || ''));
+    if (!m) return null;
+    return { x: +m[1], y: +m[2], w: +m[3], h: +m[4] };
+  }
+
+  /** Group region rows by source IRI and return the most-annotated
+   *  source plus all rects on it. */
+  _pickDominantSource(rows) {
+    const bySource = new Map();
+    for (const row of rows) {
+      const src = row?.source?.value;
+      const rect = this._parseXywh(row?.xywh?.value);
+      if (!src || !rect) continue;
+      if (!bySource.has(src)) bySource.set(src, []);
+      bySource.get(src).push(rect);
+    }
+    let best = null;
+    for (const [src, rects] of bySource) {
+      if (!best || rects.length > best.rects.length) best = { src, rects };
+    }
+    return best;   // { src, rects } | null
+  }
+
+  /** Probe whether a URL looks like a IIIF Image API endpoint. We
+   *  give OSD the source as-is when it does, otherwise fall back to
+   *  treating the URL as a plain raster image. */
+  _looksLikeIiif(url) {
+    return /\/(info\.json|full\/[^\/]+\/0\/default\.(?:jpg|png))?$/.test(url)
+        || /iiif/.test(url);
+  }
+
+  /** Heatmap renderer: take the dominant painting source from the
+   *  data, mount an OpenSeadragon viewer on its IIIF image, and
+   *  paint a static canvas overlay with radial gradients per xywh.
+   *  OSD's overlay system handles the zoom/pan transformation
+   *  natively — no live redraw needed on update-viewport. */
   async _renderVizPainting() {
     const host = this._vizViewMount?.querySelector('#mma-viz-painting');
-    if (host) host.innerHTML = `<div class="viz-empty">Painting heatmap — M3</div>`;
+    if (!host) return;
+
+    const rows = this._vizDataCache?.paintingRegions || [];
+    const dominant = this._pickDominantSource(rows);
+    if (!dominant || dominant.rects.length === 0) {
+      host.innerHTML = `<div class="viz-empty">No painting annotations yet to visualize.</div>`;
+      return;
+    }
+    const { src, rects } = dominant;
+
+    // Lay out: source label + viewer area.
+    host.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;gap:14px;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mma-q-text-faint);word-break:break-all;">${this._escHtml(src)}</span>
+        <span style="font-size:11px;color:var(--mma-q-text-muted);">${rects.length} region${rects.length === 1 ? '' : 's'}</span>
+      </div>
+      <div id="mma-viz-painting-viewer" style="position:relative;width:100%;height:480px;background:var(--mma-q-bg-sunken);border:1px solid var(--mma-q-border-soft);border-radius:8px;overflow:hidden;"></div>
+    `;
+    const viewerEl = host.querySelector('#mma-viz-painting-viewer');
+
+    // Ensure OSD is available. The annotator already imports it via
+    // the panel components; reuse window.OpenSeadragon.
+    if (!window.OpenSeadragon) {
+      try {
+        await import('openseadragon').then((m) => {
+          window.OpenSeadragon = m.default || m.OpenSeadragon || window.OpenSeadragon;
+        });
+      } catch (err) {
+        viewerEl.innerHTML = `<div class="viz-error" style="padding:24px;">OpenSeadragon failed to load: ${this._escHtml(err.message || String(err))}</div>`;
+        return;
+      }
+    }
+    const OSD = window.OpenSeadragon;
+
+    // Tile source: IIIF info.json if it smells like IIIF, plain
+    // image otherwise (OSD's "image" type for direct rasters).
+    let tileSources;
+    if (this._looksLikeIiif(src)) {
+      tileSources = src.endsWith('/info.json') ? src : `${src.replace(/\/$/, '')}/info.json`;
+    } else {
+      tileSources = { type: 'image', url: src };
+    }
+
+    // Destroy previous viewer instance on refresh.
+    if (this._vizPaintingViewer) {
+      try { this._vizPaintingViewer.destroy(); } catch (_) {}
+      this._vizPaintingViewer = null;
+    }
+
+    let viewer;
+    try {
+      viewer = OSD({
+        element: viewerEl,
+        tileSources,
+        showNavigationControl: true,
+        showNavigator: false,
+        defaultZoomLevel: 0,
+        minZoomImageRatio: 0.8,
+        maxZoomPixelRatio: 6,
+        crossOriginPolicy: 'Anonymous',
+      });
+    } catch (err) {
+      viewerEl.innerHTML = `<div class="viz-error" style="padding:24px;">Viewer init failed: ${this._escHtml(err.message || String(err))}</div>`;
+      return;
+    }
+    this._vizPaintingViewer = viewer;
+
+    // Once the tilesource opens we know the image's pixel size and
+    // can draw the heatmap canvas at that resolution. OSD will scale
+    // the overlay automatically as the user zooms/pans.
+    viewer.addHandler('open', () => {
+      try {
+        const tiled = viewer.world.getItemAt(0);
+        if (!tiled) return;
+        const dims = tiled.getContentSize();
+        const W = dims.x, H = dims.y;
+
+        // Build the heatmap canvas at the image's full resolution
+        // (capped to keep memory sane — 2000px max side).
+        const cap = 2000;
+        const scale = Math.min(1, cap / Math.max(W, H));
+        const cw = Math.max(1, Math.round(W * scale));
+        const ch = Math.max(1, Math.round(H * scale));
+
+        const off = document.createElement('canvas');
+        off.width = cw; off.height = ch;
+        const ctx = off.getContext('2d');
+        ctx.globalCompositeOperation = 'lighter';
+
+        // For each region, drop a radial gradient blob centred on
+        // the rect. Blob radius = ~max(width,height)*0.9 in scaled
+        // px so overlapping regions reinforce visibly.
+        for (const r of rects) {
+          const cx = (r.x + r.w / 2) * scale;
+          const cy = (r.y + r.h / 2) * scale;
+          const radius = Math.max(r.w, r.h) * scale * 0.9;
+          const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+          g.addColorStop(0,   'rgba(255,255,255,0.85)');
+          g.addColorStop(0.5, 'rgba(255,255,255,0.35)');
+          g.addColorStop(1,   'rgba(255,255,255,0)');
+          ctx.fillStyle = g;
+          ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+        }
+
+        // Colormap the intensity (alpha channel) into transparent →
+        // blue → green → yellow → red.
+        const img = ctx.getImageData(0, 0, cw, ch);
+        const px  = img.data;
+        const ramp = (t) => {
+          // 5-stop ramp [transparent, blue, green, yellow, red].
+          const stops = [
+            [0,   0,   0,   0],
+            [80,  140, 255, 110],
+            [80,  220, 130, 170],
+            [240, 215, 60,  220],
+            [240, 80,  60,  240],
+          ];
+          const seg = Math.min(stops.length - 2, Math.floor(t * (stops.length - 1)));
+          const u = (t * (stops.length - 1)) - seg;
+          const a = stops[seg], b = stops[seg + 1];
+          return [
+            a[0] + (b[0] - a[0]) * u,
+            a[1] + (b[1] - a[1]) * u,
+            a[2] + (b[2] - a[2]) * u,
+            a[3] + (b[3] - a[3]) * u,
+          ];
+        };
+        // Find max alpha for normalisation.
+        let maxA = 0;
+        for (let i = 3; i < px.length; i += 4) if (px[i] > maxA) maxA = px[i];
+        if (maxA === 0) maxA = 1;
+        for (let i = 0; i < px.length; i += 4) {
+          const t = px[i + 3] / maxA;
+          const [r, g, b, a] = ramp(t);
+          px[i]     = r;
+          px[i + 1] = g;
+          px[i + 2] = b;
+          px[i + 3] = a;
+        }
+        ctx.putImageData(img, 0, 0);
+
+        // Mount the canvas as an OSD overlay covering the full image.
+        // The viewport rect (0,0,1,H/W) is the canonical "whole image"
+        // rectangle in OSD's normalised viewport coordinates.
+        off.style.opacity = '0.55';
+        viewer.addOverlay({
+          element: off,
+          location: new OSD.Rect(0, 0, 1, H / W),
+        });
+      } catch (err) {
+        console.warn('[Viz] painting heatmap overlay failed', err);
+      }
+    });
+
+    viewer.addHandler('open-failed', (ev) => {
+      console.warn('[Viz] painting tilesource open-failed', ev);
+      viewerEl.innerHTML = `<div class="viz-error" style="padding:24px;">Could not open painting tilesource: ${this._escHtml(String(ev?.message || src))}</div>`;
+    });
   }
+  /** Fetch a IIIF manifest (cached). Returns the parsed JSON or null
+   *  on failure. */
+  async _fetchIiifManifest(url) {
+    this._manifestCache = this._manifestCache || new Map();
+    if (this._manifestCache.has(url)) return this._manifestCache.get(url);
+    try {
+      const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      this._manifestCache.set(url, json);
+      return json;
+    } catch (err) {
+      console.warn('[Viz] manifest fetch failed', url, err);
+      this._manifestCache.set(url, null);
+      return null;
+    }
+  }
+
+  /** Best-effort manuscript manifest URL discovery from the
+   *  facsimile sources in the loaded data. Falls back to the
+   *  hardcoded Bocchi/Raimondi codex if nothing usable surfaces. */
+  _deriveManuscriptManifestUrl() {
+    const FALLBACK = 'https://dl.ficlit.unibo.it/iiif/2/19266/manifest';
+    const rows = this._vizDataCache?.facsimileCounts || [];
+    // The recorded `facsimileCanvas` is typically a canvas IRI like
+    // .../iiif/2/<id>/canvas/p<N>. The manifest sits at the parent
+    // /iiif/2/<id>/manifest. If we can't reverse-engineer it
+    // safely, fall back to the known demo manifest.
+    for (const row of rows) {
+      const v = row?.facsimileCanvas?.value || '';
+      const m = /^(.+\/iiif\/\d+\/[^\/]+)\/canvas/.exec(v);
+      if (m) return `${m[1]}/manifest`;
+    }
+    return FALLBACK;
+  }
+
+  /** Canvases (IIIF 2.x or 3.x) from a manifest, normalised to a
+   *  small dict per canvas: {id, label, imageBase, width, height}. */
+  _canvasesFromManifest(manifest) {
+    if (!manifest) return [];
+    const out = [];
+    // IIIF 2.x
+    if (Array.isArray(manifest.sequences)) {
+      const canvases = manifest.sequences[0]?.canvases || [];
+      for (const c of canvases) {
+        const im = c.images?.[0]?.resource;
+        const service = im?.service;
+        const imageBase = (service && (service['@id'] || service.id)) || im?.['@id'] || im?.id || null;
+        out.push({
+          id:        c['@id'] || c.id,
+          label:     (typeof c.label === 'string' ? c.label : (c.label?.en?.[0] || c.label?.['@value'] || '')) || '',
+          imageBase,
+          width:  c.width  || im?.width  || 0,
+          height: c.height || im?.height || 0,
+        });
+      }
+      return out;
+    }
+    // IIIF 3.x
+    if (Array.isArray(manifest.items)) {
+      for (const c of manifest.items) {
+        const anno = c.items?.[0]?.items?.[0];
+        const body = anno?.body;
+        const service = Array.isArray(body?.service) ? body.service[0] : body?.service;
+        const imageBase = (service && (service.id || service['@id'])) || body?.id || null;
+        out.push({
+          id:        c.id,
+          label:     (typeof c.label === 'string' ? c.label : (c.label?.en?.[0] || c.label?.none?.[0] || '')) || '',
+          imageBase,
+          width:  c.width  || body?.width  || 0,
+          height: c.height || body?.height || 0,
+        });
+      }
+      return out;
+    }
+    return [];
+  }
+
   async _renderVizCodex() {
     const host = this._vizViewMount?.querySelector('#mma-viz-codex');
-    if (host) host.innerHTML = `<div class="viz-empty">Codex grid — M4+M5</div>`;
+    if (!host) return;
+
+    const counts = this._vizDataCache?.facsimileCounts || [];
+    const countByCanvas = new Map();
+    for (const row of counts) {
+      const k = row?.facsimileCanvas?.value;
+      const n = parseInt(row?.count?.value, 10);
+      if (k && Number.isFinite(n)) countByCanvas.set(k, n);
+    }
+
+    const manifestUrl = this._deriveManuscriptManifestUrl();
+    host.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;gap:14px;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mma-q-text-faint);word-break:break-all;">${this._escHtml(manifestUrl)}</span>
+        <span style="font-size:11px;color:var(--mma-q-text-muted);" id="mma-viz-codex-stats"></span>
+      </div>
+      <div id="mma-viz-codex-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;">
+        <div class="viz-loading" style="grid-column:1/-1;">Loading manuscript manifest…</div>
+      </div>
+      <div id="mma-viz-codex-detail" style="margin-top:24px;"></div>
+    `;
+    const gridEl   = host.querySelector('#mma-viz-codex-grid');
+    const statsEl  = host.querySelector('#mma-viz-codex-stats');
+
+    const manifest = await this._fetchIiifManifest(manifestUrl);
+    if (!manifest) {
+      gridEl.innerHTML = `<div class="viz-error" style="grid-column:1/-1;">Could not load manifest: ${this._escHtml(manifestUrl)}</div>`;
+      return;
+    }
+    const canvases = this._canvasesFromManifest(manifest);
+    if (canvases.length === 0) {
+      gridEl.innerHTML = `<div class="viz-empty" style="grid-column:1/-1;">Manifest has no canvases.</div>`;
+      return;
+    }
+    // Max count for intensity normalisation.
+    let maxCount = 0;
+    for (const c of canvases) {
+      const n = countByCanvas.get(c.id) || 0;
+      if (n > maxCount) maxCount = n;
+    }
+    const annotated = canvases.filter((c) => (countByCanvas.get(c.id) || 0) > 0).length;
+    if (statsEl) statsEl.textContent = `${canvases.length} pages · ${annotated} annotated · max ${maxCount}/page`;
+
+    gridEl.innerHTML = canvases.map((c, i) => {
+      const n = countByCanvas.get(c.id) || 0;
+      const intensity = maxCount > 0 ? (n / maxCount) : 0;
+      const tintAlpha = (intensity * 0.65).toFixed(3);
+      const label = c.label || `Canvas ${i + 1}`;
+      const tooltip = `Page ${label} — ${n} annotation${n === 1 ? '' : 's'}`;
+      return `
+        <button class="viz-codex-cell" type="button"
+                data-canvas-id="${this._escAttr(c.id)}"
+                data-canvas-label="${this._escAttr(label)}"
+                data-image-base="${this._escAttr(c.imageBase || '')}"
+                data-canvas-width="${c.width || 0}"
+                data-canvas-height="${c.height || 0}"
+                data-annotation-count="${n}"
+                title="${this._escAttr(tooltip)}"
+                style="background:transparent;border:1px solid var(--mma-q-border-soft);border-radius:6px;padding:0;cursor:pointer;display:flex;flex-direction:column;overflow:hidden;transition:transform 0.12s ease, border-color 0.12s ease;">
+          <div class="viz-codex-thumb" data-pending="1"
+               style="position:relative;width:100%;aspect-ratio:3/4;background:var(--mma-q-bg-sunken);">
+            <div class="viz-codex-tint" aria-hidden="true"
+                 style="position:absolute;inset:0;background:rgba(255,80,60,${tintAlpha});pointer-events:none;"></div>
+          </div>
+          <div style="padding:6px 8px;display:flex;justify-content:space-between;align-items:baseline;gap:6px;">
+            <span style="font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:11px;color:var(--mma-q-text-muted);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this._escHtml(label)}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:${n > 0 ? 'var(--mma-q-accent)' : 'var(--mma-q-text-faint)'};">${n}</span>
+          </div>
+        </button>`;
+    }).join('');
+
+    // Inject viz-codex-cell hover style once.
+    if (!document.getElementById('mma-viz-codex-style')) {
+      const s = document.createElement('style');
+      s.id = 'mma-viz-codex-style';
+      s.textContent = `
+        .viz-codex-cell:hover { transform: scale(1.03); border-color: var(--mma-q-accent-ring) !important; }
+        .viz-codex-cell.selected { border-color: var(--mma-q-accent) !important; box-shadow: 0 0 0 2px var(--mma-q-accent-bg); }
+      `;
+      document.head.appendChild(s);
+    }
+
+    // Lazy-load thumbnails via IntersectionObserver. IIIF 2.x: image
+    // API at .../full/200,/0/default.jpg. Cap width to 200px.
+    const io = new IntersectionObserver((entries, obs) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const cell  = e.target.closest('.viz-codex-cell');
+        const thumb = e.target;
+        if (thumb.dataset.pending !== '1') continue;
+        thumb.dataset.pending = '0';
+        const base = cell?.dataset?.imageBase || '';
+        if (!base) continue;
+        const url = `${base.replace(/\/$/, '')}/full/200,/0/default.jpg`;
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = '';
+        img.loading = 'lazy';
+        img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
+        img.onerror = () => {
+          thumb.innerHTML = '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--mma-q-text-faint);">no thumb</div>'
+            + thumb.innerHTML;
+        };
+        thumb.insertBefore(img, thumb.firstChild);
+        obs.unobserve(thumb);
+      }
+    }, { rootMargin: '200px' });
+    gridEl.querySelectorAll('.viz-codex-thumb').forEach((t) => io.observe(t));
+
+    // Click → open detail. Wired in M5.
+    gridEl.querySelectorAll('.viz-codex-cell').forEach((btn) => {
+      btn.addEventListener('click', () => this._openCodexDetail(btn));
+    });
+  }
+
+  /** Render the per-page detail under the grid: OSD viewer of the
+   *  canvas + line-heatmap overlay built from F2_Expression target
+   *  xywhs filtered to this source. Known caveat: PAGE-XML line
+   *  selectors produce horizontal bands, not blobs — that's the
+   *  expected look for the demo. */
+  _openCodexDetail(cellBtn) {
+    if (!cellBtn) return;
+    const canvasId    = cellBtn.dataset.canvasId;
+    const canvasLabel = cellBtn.dataset.canvasLabel || canvasId;
+    const imageBase   = cellBtn.dataset.imageBase;
+    const W = parseInt(cellBtn.dataset.canvasWidth,  10) || 0;
+    const H = parseInt(cellBtn.dataset.canvasHeight, 10) || 0;
+    if (!imageBase) return;
+
+    // Highlight the selected cell, un-highlight any previous one.
+    const host = this._vizViewMount?.querySelector('#mma-viz-codex');
+    host?.querySelectorAll('.viz-codex-cell.selected').forEach((b) => b.classList.remove('selected'));
+    cellBtn.classList.add('selected');
+
+    // Filter F2_Expression rects to this canvas.
+    const rows = this._vizDataCache?.facsimileRegions || [];
+    const rects = [];
+    for (const row of rows) {
+      if (row?.source?.value !== canvasId) continue;
+      const rect = this._parseXywh(row?.xywh?.value);
+      if (rect) rects.push(rect);
+    }
+
+    const detail = host?.querySelector('#mma-viz-codex-detail');
+    if (!detail) return;
+    detail.innerHTML = `
+      <div style="border:1px solid var(--mma-q-border-soft);border-radius:10px;background:var(--mma-q-bg-elevated);padding:18px 20px 20px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;gap:14px;">
+          <div>
+            <div style="font-family:Spectral,Georgia,serif;font-size:15px;color:var(--mma-q-text-primary);">${this._escHtml(canvasLabel)}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mma-q-text-faint);word-break:break-all;margin-top:2px;">${this._escHtml(canvasId)}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:11px;color:var(--mma-q-text-muted);">${rects.length} line region${rects.length === 1 ? '' : 's'}</span>
+            <button class="viz-refresh-btn" id="mma-viz-codex-detail-close" type="button">Close</button>
+          </div>
+        </div>
+        <div id="mma-viz-codex-detail-viewer" style="position:relative;width:100%;height:560px;background:var(--mma-q-bg-sunken);border:1px solid var(--mma-q-border-soft);border-radius:8px;overflow:hidden;"></div>
+      </div>
+    `;
+    // Smooth scroll to the detail.
+    setTimeout(() => detail.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
+
+    detail.querySelector('#mma-viz-codex-detail-close')?.addEventListener('click', () => {
+      cellBtn.classList.remove('selected');
+      if (this._vizCodexViewer) {
+        try { this._vizCodexViewer.destroy(); } catch (_) {}
+        this._vizCodexViewer = null;
+      }
+      detail.innerHTML = '';
+    });
+
+    const viewerEl = detail.querySelector('#mma-viz-codex-detail-viewer');
+    const OSD = window.OpenSeadragon;
+    if (!OSD) {
+      viewerEl.innerHTML = `<div class="viz-error" style="padding:24px;">OpenSeadragon unavailable.</div>`;
+      return;
+    }
+
+    // Destroy any previous detail viewer.
+    if (this._vizCodexViewer) {
+      try { this._vizCodexViewer.destroy(); } catch (_) {}
+      this._vizCodexViewer = null;
+    }
+
+    let viewer;
+    try {
+      viewer = OSD({
+        element: viewerEl,
+        tileSources: `${imageBase.replace(/\/$/, '')}/info.json`,
+        showNavigationControl: true,
+        showNavigator: false,
+        defaultZoomLevel: 0,
+        minZoomImageRatio: 0.8,
+        maxZoomPixelRatio: 6,
+        crossOriginPolicy: 'Anonymous',
+      });
+    } catch (err) {
+      viewerEl.innerHTML = `<div class="viz-error" style="padding:24px;">Viewer init failed: ${this._escHtml(err.message || String(err))}</div>`;
+      return;
+    }
+    this._vizCodexViewer = viewer;
+
+    viewer.addHandler('open', () => {
+      try {
+        const tiled = viewer.world.getItemAt(0);
+        if (!tiled) return;
+        const dims = tiled.getContentSize();
+        const Wp = W || dims.x;
+        const Hp = H || dims.y;
+
+        if (rects.length === 0) return;
+
+        // Build canvas at image resolution (capped 2000px).
+        const cap = 2000;
+        const scale = Math.min(1, cap / Math.max(Wp, Hp));
+        const cw = Math.max(1, Math.round(Wp * scale));
+        const ch = Math.max(1, Math.round(Hp * scale));
+        const off = document.createElement('canvas');
+        off.width = cw; off.height = ch;
+        const ctx = off.getContext('2d');
+        ctx.globalCompositeOperation = 'lighter';
+
+        // Line-shaped blobs: horizontal axis = wide gradient bar
+        // because PAGE-XML targets span (most of) the page width.
+        for (const r of rects) {
+          const cx = (r.x + r.w / 2) * scale;
+          const cy = (r.y + r.h / 2) * scale;
+          const rad = Math.max(r.h, r.w * 0.6) * scale;
+          const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+          g.addColorStop(0,   'rgba(255,255,255,0.85)');
+          g.addColorStop(0.5, 'rgba(255,255,255,0.4)');
+          g.addColorStop(1,   'rgba(255,255,255,0)');
+          ctx.fillStyle = g;
+          ctx.fillRect(cx - rad, cy - rad, rad * 2, rad * 2);
+        }
+
+        const img = ctx.getImageData(0, 0, cw, ch);
+        const px  = img.data;
+        const ramp = (t) => {
+          const stops = [
+            [0,   0,   0,   0],
+            [80,  140, 255, 110],
+            [80,  220, 130, 170],
+            [240, 215, 60,  220],
+            [240, 80,  60,  240],
+          ];
+          const seg = Math.min(stops.length - 2, Math.floor(t * (stops.length - 1)));
+          const u = (t * (stops.length - 1)) - seg;
+          const a = stops[seg], b = stops[seg + 1];
+          return [
+            a[0] + (b[0] - a[0]) * u,
+            a[1] + (b[1] - a[1]) * u,
+            a[2] + (b[2] - a[2]) * u,
+            a[3] + (b[3] - a[3]) * u,
+          ];
+        };
+        let maxA = 0;
+        for (let i = 3; i < px.length; i += 4) if (px[i] > maxA) maxA = px[i];
+        if (maxA === 0) maxA = 1;
+        for (let i = 0; i < px.length; i += 4) {
+          const t = px[i + 3] / maxA;
+          const [r, g, b, a] = ramp(t);
+          px[i]     = r;
+          px[i + 1] = g;
+          px[i + 2] = b;
+          px[i + 3] = a;
+        }
+        ctx.putImageData(img, 0, 0);
+
+        off.style.opacity = '0.55';
+        viewer.addOverlay({
+          element: off,
+          location: new OSD.Rect(0, 0, 1, Hp / Wp),
+        });
+      } catch (err) {
+        console.warn('[Viz] codex detail heatmap failed', err);
+      }
+    });
+
+    viewer.addHandler('open-failed', (ev) => {
+      console.warn('[Viz] codex tilesource open-failed', ev);
+      viewerEl.innerHTML = `<div class="viz-error" style="padding:24px;">Could not open canvas tilesource.</div>`;
+    });
   }
 
   /** Sample queries pre-loaded in the YASGUI dropdown. Predicates
