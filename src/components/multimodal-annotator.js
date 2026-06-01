@@ -7122,7 +7122,11 @@ Annotation Details:
 
   // Panel management methods
   initializePanels() {
-    // Initialize with default panels if no panels are defined
+    // Initialize with default panels if no panels are defined.
+    // Layout order (left → right): Transcription, Visual Work, Facsimile.
+    // Visual Work sits next to Transcription so the cross-modal
+    // linking flow (the demo's main artefact) is the visually
+    // adjacent pair; Facsimile is the supporting page reference.
     if (this.panels.length === 0) {
       // Text panel with PAGE XML transcriptions (Transkribus)
       this.addPanel('text', {
@@ -7131,16 +7135,16 @@ Annotation Details:
         pagexml: '/examples/page/0018_00018.xml' // Load page 18 as default (page with content)
       });
 
+      // Image panel with Europeana manifest (the ekphrastic target)
+      this.addPanel('image', {
+        label: 'Visual Work',
+        manifest: 'https://iiif.europeana.eu/presentation/366/item_7PWBIM2OZFXYT5ZC5Y7IFXBZSNB7TOZ6/manifest'
+      });
+
       // Facsimile panel with IIIF manuscript (Quaderno Raimondi - Università di Bologna)
       this.addPanel('facsimile', {
         label: 'Facsimile',
         manifest: 'https://dl.ficlit.unibo.it/iiif/2/19266/manifest'
-      });
-
-      // Image panel with Europeana manifest
-      this.addPanel('image', {
-        label: 'Visual Work',
-        manifest: 'https://iiif.europeana.eu/presentation/366/item_7PWBIM2OZFXYT5ZC5Y7IFXBZSNB7TOZ6/manifest'
       });
     }
   }
