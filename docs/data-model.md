@@ -1,7 +1,8 @@
 # Data model
 
 Every annotation is an `oa:Annotation` (W3C Web Annotation). The default
-profile (`interim-geko`) layers four ontologies on top:
+profile (INTERIM, bundled under `profiles/interim-geko/`) layers four
+ontologies on top:
 
 | Ontology | What it adds |
 |----------|-------------|

@@ -3,7 +3,7 @@
 A profile is a bundle of files that tells the tool which ontology to
 use, which modalities the user can pick, and which JSON-LD context to
 serialise with. One profile is active per session. The default profile
-is `interim-geko` (ekphrasis research).
+is INTERIM (bundled under `profiles/interim-geko/`, ekphrasis research).
 
 The profile system is described in `docs/adr/0003-pluggable-profiles.md`.
 This document is the operational reference.
@@ -134,5 +134,6 @@ On load:
    `missing_ontologies` for your new profile).
 
 There is no profile-switcher UI in Phase 1. The active profile is the
-one the frontend hardcodes its references against (currently
-`interim-geko`). Profile selection at runtime is a Phase 3 concern.
+one the frontend hardcodes its references against (currently INTERIM,
+i.e. `profiles/interim-geko/`). Profile selection at runtime is a
+Phase 3 concern.

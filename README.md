@@ -4,8 +4,7 @@ A research prototype for semantic annotation across text and image. Users open
 text sources (plain text, TEI, PAGE-XML) alongside IIIF image resources, then
 link text spans to image regions under a typed ekphrastic relation. The
 linked structure is stored as W3C Web Annotations in RDF. The ontology stack
-is pluggable per project; the default profile is INTERIM / GEKO (ekphrasis
-research).
+is pluggable per project; the default profile is INTERIM (ekphrasis research).
 
 Stack: Vite + vanilla Web Components (frontend), FastAPI (gateway),
 Apache Jena Fuseki + TDB2 (triple store), OpenSeadragon (IIIF viewer),
