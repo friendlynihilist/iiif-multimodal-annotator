@@ -25,3 +25,6 @@ build/
 backend/.venv/
 __pycache__/
 *.pyc
+
+# Local backup of unclear/legacy files moved during repo cleanup
+.backup/
