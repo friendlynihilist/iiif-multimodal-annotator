@@ -1,0 +1,121 @@
+{
+  "@context": "http://iiif.io/api/presentation/2/context.json",
+  "@id": "http://localhost:5173/peirce-manifest.json",
+  "@type": "sc:Manifest",
+  "label": "Peirce - Pragmatism Manuscript",
+  "description": "Charles S. Peirce autograph manuscript on Pragmatism",
+  "sequences": [
+    {
+      "@id": "http://localhost:5173/sequence/normal",
+      "@type": "sc:Sequence",
+      "label": "Current order",
+      "canvases": [
+        {
+          "@id": "http://localhost:5173/canvas/1",
+          "@type": "sc:Canvas",
+          "label": "Page 1",
+          "height": 3000,
+          "width": 2400,
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "resource": {
+                "@id": "http://localhost:5173/images/seq1.jpg",
+                "@type": "dctypes:Image",
+                "format": "image/jpeg",
+                "height": 3000,
+                "width": 2400
+              },
+              "on": "http://localhost:5173/canvas/1"
+            }
+          ]
+        },
+        {
+          "@id": "http://localhost:5173/canvas/2",
+          "@type": "sc:Canvas",
+          "label": "Page 2",
+          "height": 3000,
+          "width": 2400,
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "resource": {
+                "@id": "http://localhost:5173/images/seq2.jpg",
+                "@type": "dctypes:Image",
+                "format": "image/jpeg",
+                "height": 3000,
+                "width": 2400
+              },
+              "on": "http://localhost:5173/canvas/2"
+            }
+          ]
+        },
+        {
+          "@id": "http://localhost:5173/canvas/3",
+          "@type": "sc:Canvas",
+          "label": "Page 3",
+          "height": 3000,
+          "width": 2400,
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "resource": {
+                "@id": "http://localhost:5173/images/seq3.jpg",
+                "@type": "dctypes:Image",
+                "format": "image/jpeg",
+                "height": 3000,
+                "width": 2400
+              },
+              "on": "http://localhost:5173/canvas/3"
+            }
+          ]
+        },
+        {
+          "@id": "http://localhost:5173/canvas/4",
+          "@type": "sc:Canvas",
+          "label": "Page 4",
+          "height": 3000,
+          "width": 2400,
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "resource": {
+                "@id": "http://localhost:5173/images/seq4.jpg",
+                "@type": "dctypes:Image",
+                "format": "image/jpeg",
+                "height": 3000,
+                "width": 2400
+              },
+              "on": "http://localhost:5173/canvas/4"
+            }
+          ]
+        },
+        {
+          "@id": "http://localhost:5173/canvas/5",
+          "@type": "sc:Canvas",
+          "label": "Page 5",
+          "height": 3000,
+          "width": 2400,
+          "images": [
+            {
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "resource": {
+                "@id": "http://localhost:5173/images/seq5.jpg",
+                "@type": "dctypes:Image",
+                "format": "image/jpeg",
+                "height": 3000,
+                "width": 2400
+              },
+              "on": "http://localhost:5173/canvas/5"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
