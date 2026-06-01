@@ -1,0 +1,564 @@
+{
+  "@context": {
+    "brick": "https://brickschema.org/schema/Brick#",
+    "crm": "http://www.cidoc-crm.org/cidoc-crm/",
+    "csvw": "http://www.w3.org/ns/csvw#",
+    "dc": "http://purl.org/dc/elements/1.1/",
+    "dcam": "http://purl.org/dc/dcam/",
+    "dcat": "http://www.w3.org/ns/dcat#",
+    "dcmitype": "http://purl.org/dc/dcmitype/",
+    "dct": "http://purl.org/dc/terms/",
+    "doap": "http://usefulinc.com/ns/doap#",
+    "foaf": "http://xmlns.com/foaf/0.1/",
+    "geko": "https://w3id.org/geko/",
+    "geo": "http://www.opengis.net/ont/geosparql#",
+    "hico": "http://purl.org/emmedi/hico/",
+    "icon": "https://w3id.org/icon/ontology/",
+    "interim": "https://w3id.org/interim/",
+    "lrmoo": "http://iflastandards.info/ns/lrm/lrmoo/",
+    "miro": "https://w3id.org/miro/",
+    "mlao": "https://w3id.org/mlao/",
+    "oa": "http://www.w3.org/ns/oa#",
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "org": "http://www.w3.org/ns/org#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "prof": "http://www.w3.org/ns/dx/prof/",
+    "prov": "http://www.w3.org/ns/prov#",
+    "qb": "http://purl.org/linked-data/cube#",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "sc": "http://iiif.io/api/presentation/2#",
+    "schema": "https://schema.org/",
+    "sh": "http://www.w3.org/ns/shacl#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "sosa": "http://www.w3.org/ns/sosa/",
+    "ssn": "http://www.w3.org/ns/ssn/",
+    "time": "http://www.w3.org/2006/time#",
+    "vann": "http://purl.org/vocab/vann/",
+    "void": "http://rdfs.org/ns/void#",
+    "wgs": "https://www.w3.org/2003/01/geo/wgs84_pos#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#"
+  },
+  "@graph": [
+    {
+      "@id": "interim:IntermedialObject",
+      "@type": "owl:Class",
+      "rdfs:comment": {
+        "@language": "en",
+        "@value": "The resulting object produced by an intermedial relation."
+      },
+      "rdfs:subClassOf": {
+        "@id": "crm:E73_Information_Object"
+      }
+    },
+    {
+      "@id": "interim:IntermedialRelation",
+      "@type": "owl:Class",
+      "owl:equivalentClass": {
+        "@id": "miro:IntermedialRelation"
+      },
+      "rdfs:comment": {
+        "@language": "en",
+        "@value": "The core class representing the relationship between two different media."
+      },
+      "rdfs:subClassOf": {
+        "@id": "crm:E89_Propositional_Object"
+      }
+    },
+    {
+      "@id": "interim:producesObject",
+      "@type": "owl:ObjectProperty",
+      "rdfs:comment": {
+        "@language": "en",
+        "@value": "Links the relation to the object it produces."
+      },
+      "rdfs:domain": {
+        "@id": "interim:IntermedialRelation"
+      },
+      "rdfs:range": {
+        "@id": "interim:IntermedialObject"
+      }
+    },
+    {
+      "@id": "oa:Motivation",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "oa:hasBody",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "oa:Annotation"
+      },
+      "rdfs:range": {
+        "@id": "oa:TextualBody"
+      }
+    },
+    {
+      "@id": "oa:motivatedBy",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "oa:Annotation"
+      },
+      "rdfs:range": {
+        "@id": "oa:Motivation"
+      }
+    },
+    {
+      "@id": "mlao:hasAnchor",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "oa:Annotation"
+      },
+      "rdfs:range": {
+        "@id": "mlao:Anchor"
+      }
+    },
+    {
+      "@id": "geko:hasIconicReferent",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "geko:Ekphrasis"
+      },
+      "rdfs:range": {
+        "@id": "lrmoo:F1_Work"
+      }
+    },
+    {
+      "@id": "icon:IconologicalSubject",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "geko:dynamisation",
+      "@type": "skos:Concept",
+      "skos:inScheme": {
+        "@id": "geko:modalitiesScheme"
+      }
+    },
+    {
+      "@id": "oa:Text",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "https://w3id.org/interim",
+      "@type": "owl:Ontology",
+      "dct:description": {
+        "@language": "en",
+        "@value": "Ontology describing intermedial relations and ekphrasis in Digital Humanities."
+      },
+      "dct:title": {
+        "@language": "en",
+        "@value": "INTERIM Ontology"
+      }
+    },
+    {
+      "@id": "dct:created",
+      "@type": "owl:DatatypeProperty",
+      "rdfs:range": {
+        "@id": "xsd:DateTime"
+      }
+    },
+    {
+      "@id": "prov:wasGeneratedBy",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "oa:Annotation"
+      },
+      "rdfs:range": {
+        "@id": "hico:InterpretationAct"
+      }
+    },
+    {
+      "@id": "hico:hasInterpretationType",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "hico:InterpretationAct"
+      },
+      "rdfs:range": {
+        "@id": "hico:InterpretationType"
+      }
+    },
+    {
+      "@id": "geko:hasEkphrasticModality",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "geko:Ekphrasis"
+      },
+      "rdfs:range": {
+        "@id": "skos:ConceptScheme"
+      }
+    },
+    {
+      "@id": "prov:hadMember",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "prov:Collection"
+      },
+      "rdfs:range": {
+        "@id": "oa:Annotation"
+      }
+    },
+    {
+      "@id": "miro:IntermedialRelation",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "icon:PreiconographicalSubject",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "oa:hasSource",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "oa:SpecificResource"
+      },
+      "rdfs:range": {
+        "@id": "_:n94bba2d250514a03b5db82abe09e7712b10"
+      }
+    },
+    {
+      "@id": "_:n94bba2d250514a03b5db82abe09e7712b10",
+      "@type": "owl:Class",
+      "owl:unionOf": {
+        "@list": [
+          {
+            "@id": "sc:Canvas"
+          },
+          {
+            "@id": "oa:Text"
+          }
+        ]
+      }
+    },
+    {
+      "@id": "sc:Manifest",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "mlao:hasConceptualLevel",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "mlao:Anchor"
+      },
+      "rdfs:range": {
+        "@id": "_:n94bba2d250514a03b5db82abe09e7712b13"
+      }
+    },
+    {
+      "@id": "_:n94bba2d250514a03b5db82abe09e7712b13",
+      "@type": "owl:Class",
+      "owl:unionOf": {
+        "@list": [
+          {
+            "@id": "icon:PreiconographicalSubject"
+          },
+          {
+            "@id": "icon:IconographicalSubject"
+          },
+          {
+            "@id": "icon:IconologicalSubject"
+          }
+        ]
+      }
+    },
+    {
+      "@id": "foaf:name",
+      "@type": "owl:DatatypeProperty",
+      "rdfs:domain": {
+        "@id": "foaf:Person"
+      },
+      "rdfs:range": {
+        "@id": "xsd:string"
+      }
+    },
+    {
+      "@id": "hico:hasInterpretationCriterion",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "hico:InterpretationAct"
+      },
+      "rdfs:range": {
+        "@id": "hico:InterpretationCriterion"
+      }
+    },
+    {
+      "@id": "mlao:isAnchoredTo",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "mlao:Anchor"
+      },
+      "rdfs:range": {
+        "@id": "crm:E1_Entity"
+      }
+    },
+    {
+      "@id": "geko:Ekphrasis",
+      "@type": "owl:Class",
+      "rdfs:comment": {
+        "@language": "en",
+        "@value": "The Ekphrasis entity, modeled as a Linguistic Object and a Collection of Annotations."
+      },
+      "rdfs:subClassOf": [
+        {
+          "@id": "interim:IntermedialObject"
+        },
+        {
+          "@id": "crm:E33_LinguisticObject"
+        },
+        {
+          "@id": "prov:Collection"
+        }
+      ]
+    },
+    {
+      "@id": "prov:startedAtTime",
+      "@type": "owl:DatatypeProperty",
+      "rdfs:range": {
+        "@id": "xsd:DateTime"
+      }
+    },
+    {
+      "@id": "interim:Medium",
+      "@type": "owl:Class",
+      "rdfs:comment": {
+        "@language": "en",
+        "@value": "The medium involved in the intermedial relation."
+      }
+    },
+    {
+      "@id": "oa:FragmentSelector",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "oa:SpecificResource",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "geko:integration",
+      "@type": "skos:Concept",
+      "skos:inScheme": {
+        "@id": "geko:modalitiesScheme"
+      }
+    },
+    {
+      "@id": "miro:MediaCombination",
+      "@type": "owl:Class",
+      "rdfs:subClassOf": {
+        "@id": "miro:IntermedialRelation"
+      }
+    },
+    {
+      "@id": "oa:TextualBody",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "oa:XPathSelector",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "geko:hasAuthor",
+      "@type": "owl:ObjectProperty",
+      "owl:propertyChainAxiom": {
+        "@list": [
+          {
+            "@id": "lrmoo:R17i_wasCreatedBy"
+          },
+          {
+            "@id": "crm:P14_carriedOutBy"
+          }
+        ]
+      },
+      "rdfs:comment": {
+        "@language": "en",
+        "@value": "A shortcut property linking the Ekphrasis directly to its human author, inferred from the creation event."
+      },
+      "rdfs:domain": {
+        "@id": "geko:Ekphrasis"
+      },
+      "rdfs:range": {
+        "@id": "foaf:Person"
+      }
+    },
+    {
+      "@id": "miro:MediaTransposition",
+      "@type": "owl:Class",
+      "rdfs:subClassOf": {
+        "@id": "miro:IntermedialRelation"
+      }
+    },
+    {
+      "@id": "oa:hasTarget",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "oa:Annotation"
+      },
+      "rdfs:range": {
+        "@id": "_:n94bba2d250514a03b5db82abe09e7712b3"
+      }
+    },
+    {
+      "@id": "_:n94bba2d250514a03b5db82abe09e7712b3",
+      "@type": "owl:Class",
+      "owl:unionOf": {
+        "@list": [
+          {
+            "@id": "oa:SpecificResource"
+          },
+          {
+            "@id": "sc:Canvas"
+          },
+          {
+            "@id": "oa:Text"
+          }
+        ]
+      }
+    },
+    {
+      "@id": "interim:hasSourceMedium",
+      "@type": "owl:ObjectProperty",
+      "owl:equivalentProperty": {
+        "@id": "miro:hasMediumA"
+      },
+      "rdfs:comment": {
+        "@language": "en",
+        "@value": "The source medium in the relation."
+      },
+      "rdfs:domain": {
+        "@id": "interim:IntermedialRelation"
+      },
+      "rdfs:range": {
+        "@id": "interim:Medium"
+      }
+    },
+    {
+      "@id": "geko:modalitiesScheme",
+      "@type": "skos:ConceptScheme",
+      "dct:title": {
+        "@language": "en",
+        "@value": "Ekphrastic Modalities"
+      }
+    },
+    {
+      "@id": "geko:hasTextualReferent",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "geko:Ekphrasis"
+      },
+      "rdfs:range": {
+        "@id": "lrmoo:F2_Expression"
+      }
+    },
+    {
+      "@id": "geko:MimeticEkphrasis",
+      "@type": "owl:Class",
+      "rdfs:subClassOf": {
+        "@id": "geko:Ekphrasis"
+      }
+    },
+    {
+      "@id": "rdf:value",
+      "@type": "owl:DatatypeProperty",
+      "rdfs:range": {
+        "@id": "xsd:string"
+      }
+    },
+    {
+      "@id": "icon:IconographicalSubject",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "sc:Canvas",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "oa:hasSelector",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "oa:SpecificResource"
+      },
+      "rdfs:range": {
+        "@id": "_:n94bba2d250514a03b5db82abe09e7712b7"
+      }
+    },
+    {
+      "@id": "_:n94bba2d250514a03b5db82abe09e7712b7",
+      "@type": "owl:Class",
+      "owl:unionOf": {
+        "@list": [
+          {
+            "@id": "oa:FragmentSelector"
+          },
+          {
+            "@id": "oa:XPathSelector"
+          }
+        ]
+      }
+    },
+    {
+      "@id": "mlao:Anchor",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "interim:hasTargetMedium",
+      "@type": "owl:ObjectProperty",
+      "owl:equivalentProperty": {
+        "@id": "miro:hasMediumB"
+      },
+      "rdfs:comment": {
+        "@language": "en",
+        "@value": "The target medium in the relation."
+      },
+      "rdfs:domain": {
+        "@id": "interim:IntermedialRelation"
+      },
+      "rdfs:range": {
+        "@id": "interim:Medium"
+      }
+    },
+    {
+      "@id": "geko:denotation",
+      "@type": "skos:Concept",
+      "skos:inScheme": {
+        "@id": "geko:modalitiesScheme"
+      }
+    },
+    {
+      "@id": "oa:Annotation",
+      "@type": "owl:Class"
+    },
+    {
+      "@id": "miro:IntermedialReference",
+      "@type": "owl:Class",
+      "rdfs:subClassOf": {
+        "@id": "miro:IntermedialRelation"
+      }
+    },
+    {
+      "@id": "miro:EkphrasticRelation",
+      "@type": "owl:Class",
+      "rdfs:comment": {
+        "@language": "en",
+        "@value": "A specific type of intermedial reference denoting Ekphrasis."
+      },
+      "rdfs:subClassOf": {
+        "@id": "miro:IntermedialReference"
+      }
+    },
+    {
+      "@id": "dct:isPartOf",
+      "@type": "owl:ObjectProperty",
+      "rdfs:domain": {
+        "@id": "sc:Canvas"
+      },
+      "rdfs:range": {
+        "@id": "sc:Manifest"
+      }
+    },
+    {
+      "@id": "geko:NotionalEkphrasis",
+      "@type": "owl:Class",
+      "rdfs:subClassOf": {
+        "@id": "geko:Ekphrasis"
+      }
+    }
+  ]
+}
