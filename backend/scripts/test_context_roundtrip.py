@@ -154,7 +154,7 @@ def sample_standalone_comment() -> dict:
 
 
 def sample_with_provenance() -> dict:
-    """Reflects the example_interim.json's HICO + MLAO + ICON usage."""
+    """Canonical interim-geko sample exercising HICO + MLAO + ICON usage."""
     return {
         "@context": COMBINED_CTX,
         "type": "Annotation",
