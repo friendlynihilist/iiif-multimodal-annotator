@@ -3516,6 +3516,32 @@ export class IIIFInterimAnnotator extends HTMLElement {
           letter-spacing: 0.04em;
         }
         .profile-badge svg { flex-shrink: 0; }
+        /* Profile dropdown — styled to look like the old badge but
+           clickable. The native <select> is shown inline; arrow is
+           the default OS one (kept simple — no custom caret). */
+        .profile-badge select {
+          appearance: none;
+          -webkit-appearance: none;
+          background: transparent;
+          color: var(--mma-accent);
+          font-family: var(--mma-font-mono);
+          font-size: 11px;
+          font-weight: 500;
+          letter-spacing: 0.04em;
+          border: none;
+          outline: none;
+          padding: 0 14px 0 0;
+          cursor: pointer;
+          background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                            linear-gradient(135deg, currentColor 50%, transparent 50%);
+          background-position: calc(100% - 6px) 50%, calc(100% - 3px) 50%;
+          background-size: 3px 3px, 3px 3px;
+          background-repeat: no-repeat;
+        }
+        .profile-badge select option {
+          color: var(--mma-text);
+          background: var(--mma-bg);
+        }
 
         .app-icon-btn {
           width: 30px;
@@ -4968,7 +4994,7 @@ export class IIIFInterimAnnotator extends HTMLElement {
           <span class="app-subtitle">${APP_SUBTITLE}</span>
         </div>
         <div class="app-header-actions">
-          <span class="profile-badge" id="profile-badge" title="Active annotation profile: interim-geko">
+          <span class="profile-badge" id="profile-badge" title="Active export profile (drives which mapping the Export button emits)">
             <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"
                  fill="none" stroke="currentColor" stroke-width="1.7"
                  stroke-linecap="round" stroke-linejoin="round">
@@ -4980,7 +5006,10 @@ export class IIIFInterimAnnotator extends HTMLElement {
               <path d="M9 4v8"/>
               <path d="M15 12v8"/>
             </svg>
-            <span>INTERIM</span>
+            <select id="profile-select" aria-label="Active export profile">
+              <option value="interim-geko" selected>INTERIM</option>
+              <option value="linked-art">LINKED ART</option>
+            </select>
           </span>
           <button class="app-icon-btn" id="theme-toggle-btn" title="Switch theme" aria-label="Switch to light theme">
             <!-- Icon swapped at runtime by _applyTheme(); sun in dark mode = "go to light". -->
@@ -5603,11 +5632,35 @@ export class IIIFInterimAnnotator extends HTMLElement {
       }, 50);
     });
 
-    // Single Export button → GEKO v2 collection (the canonical
-    // poster artefact). The legacy flat-JSON-LD exporter
-    // (this.exportAnnotations) stays in the class for programmatic
-    // callers but is no longer exposed via the toolbar.
-    exportBtn.addEventListener('click', () => this.exportAnnotationsGeko());
+    // Export button → mapping is driven by the header profile dropdown.
+    //   profile=interim-geko → GEKO v2 collection (canonical poster
+    //                          artefact: AnnotationCollection → Ekphrasis
+    //                          → Annotation, with hasEkphrasticModality
+    //                          as a direct predicate).
+    //   profile=linked-art   → Linked Art JSON-LD (LinguisticObject →
+    //                          about → HumanMadeObject; modality via
+    //                          classified_as, MODE B).
+    // The legacy flat-JSON-LD exporter (this.exportAnnotations) stays
+    // in the class for programmatic callers but isn't exposed.
+    const profileSelect = this.shadowRoot.getElementById('profile-select');
+    const exportLabelSpan = exportBtn.querySelector('span');
+    const refreshExportButtonForProfile = () => {
+      const profile = profileSelect?.value || 'interim-geko';
+      if (profile === 'linked-art') {
+        if (exportLabelSpan) exportLabelSpan.textContent = 'Export Linked Art (JSON-LD)';
+        exportBtn.title = 'Export as Linked Art JSON-LD (LinguisticObject → about → HumanMadeObject; modality via classified_as)';
+      } else {
+        if (exportLabelSpan) exportLabelSpan.textContent = 'Export';
+        exportBtn.title = 'Export as GEKO Ekphrasis collection (Collection → Ekphrasis per page → Annotation)';
+      }
+    };
+    refreshExportButtonForProfile();
+    profileSelect?.addEventListener('change', refreshExportButtonForProfile);
+    exportBtn.addEventListener('click', () => {
+      const profile = profileSelect?.value || 'interim-geko';
+      if (profile === 'linked-art') return this.exportAnnotationsLinkedArt();
+      return this.exportAnnotationsGeko();
+    });
 
     // IIIF manifest export — modal with embedded / referenced choice.
     const iiifBtn = this.shadowRoot.getElementById('export-iiif-btn');
@@ -7740,6 +7793,210 @@ Annotation Details:
       integration:   { iri: 'https://w3id.org/geko/#integration',  label: 'Integration' },
     };
     return map[key] || null;
+  }
+
+  // ── Linked Art export (profile #2) ──────────────────────────────────
+  //
+  // Re-models the multimodal annotations under the Getty Linked Art
+  // profile. Three design decisions are pinned here (verified against
+  // linked.art/model — quoted in the profile manifest under `notes`):
+  //
+  //   1. MODALITY → classified_as on the LinguisticObject (MODE B).
+  //      Linked Art has NO recommended reification pattern for typing
+  //      relationships; classified_as is always a property of an
+  //      entity. So the modality classifies the text fragment.
+  //
+  //   2. TEXT → IMAGE direction → `about` (P129) on the LinguisticObject
+  //      pointing at the HumanMadeObject (painting). Documented example:
+  //      Koot's analysis of The Night Watch.
+  //
+  //   3. REGION granularity → kept at canvas / HumanMadeObject level.
+  //      Linked Art has no native xywh selector. The DigitalObject's
+  //      access_point is the canvas IRI verbatim. xywh remains in the
+  //      GEKO native export and the IIIF manifest export.
+  //
+  // Output shape: a JSON-LD doc with @context: linked.art and @graph[]
+  // containing top-level LinguisticObjects + dedup'd HumanMadeObjects
+  // / VisualItems / DigitalObjects, cross-referenced by id.
+
+  exportAnnotationsLinkedArt() {
+    const annotations = (this.store ? this.store.all() : null) || this.annotations;
+    const baseNs = 'https://w3id.org/multimodal-annotator/ns/';
+    const container = this.container || 'unknown';
+
+    const linguisticObjects = [];
+    // Painting-source IRI → { hmoId, visualId } shared across all
+    // annotations on the same painting (one HumanMadeObject node per
+    // distinct canvas in the export).
+    const hmoIndex = new Map();
+    // DigitalObject IRI → DigitalObject node (one per distinct canvas
+    // source, since we don't carry xywh into the LA export).
+    const digitalIndex = new Map();
+    let skippedNoPainting = 0;
+
+    for (const ann of annotations) {
+      const paintingSrc = this._paintingSource(ann);
+      if (!paintingSrc) { skippedNoPainting += 1; continue; }
+
+      // Register / fetch the HumanMadeObject + VisualItem ids for this
+      // painting source.
+      let obj = hmoIndex.get(paintingSrc);
+      if (!obj) {
+        const slug = this._canvasSlug(paintingSrc);
+        obj = {
+          hmoId:    `${baseNs}la/${container}/objects/${slug}`,
+          visualId: `${baseNs}la/${container}/visual/${slug}`,
+          label:    this._deriveHmoLabel(paintingSrc),
+        };
+        hmoIndex.set(paintingSrc, obj);
+      }
+
+      // DigitalObject: one per canvas, dedup'd. access_point is the
+      // canvas IRI verbatim — xywh region intentionally NOT encoded
+      // (LA has no native fragment selector; doing so would either
+      // require resolving the IIIF Image API service per canvas — out
+      // of scope for this export — or invent a non-LA property,
+      // which the user explicitly forbade).
+      if (!digitalIndex.has(paintingSrc)) {
+        digitalIndex.set(paintingSrc, {
+          id: `${baseNs}la/${container}/digital/${this._canvasSlug(paintingSrc)}`,
+          type: 'DigitalObject',
+          _label: `Digital image of ${obj.label}`,
+          format: 'image/jpeg',
+          access_point: [{ id: paintingSrc, type: 'DigitalObject' }],
+          conforms_to: [{
+            id: 'http://iiif.io/api/image/',
+            type: 'InformationObject',
+            _label: 'IIIF Image API',
+          }],
+          digitally_shows: [{ id: obj.visualId, type: 'VisualItem' }],
+        });
+      }
+
+      linguisticObjects.push(this._toLinkedArtAnnotation(ann, obj));
+    }
+
+    const hmoNodes = [];
+    for (const obj of hmoIndex.values()) {
+      hmoNodes.push({
+        id: obj.hmoId,
+        type: 'HumanMadeObject',
+        _label: obj.label,
+        shows: [{ id: obj.visualId, type: 'VisualItem' }],
+      });
+      hmoNodes.push({
+        id: obj.visualId,
+        type: 'VisualItem',
+        _label: `Visual content of ${obj.label}`,
+      });
+    }
+
+    const doc = {
+      '@context': 'https://linked.art/ns/v1/linked-art.json',
+      '@graph': [
+        ...linguisticObjects,
+        ...hmoNodes,
+        ...Array.from(digitalIndex.values()),
+      ],
+    };
+
+    const blob = new Blob(
+      [JSON.stringify(doc, null, 2)],
+      { type: 'application/ld+json' },
+    );
+    this._downloadBlob(blob, `linked-art-export-${container}-${Date.now()}.json`);
+
+    let msg = `Exported ${linguisticObjects.length} annotation(s) as Linked Art`;
+    if (skippedNoPainting > 0) {
+      msg += ` (${skippedNoPainting} skipped — no F1_Work target)`;
+    }
+    this.updateStatus(msg);
+  }
+
+  /** Normalise one cached annotation into a Linked Art LinguisticObject.
+   *  Modality (denotation / dynamization / integration) is emitted as
+   *  classified_as → Type, REUSING the GEKO IRI as the term identity
+   *  (mapping pinned in profiles/linked-art/ontology.ttl).
+   *  Anchor + provenance are intentionally NOT carried over — they
+   *  belong to the native GEKO export, not to this profile. */
+  _toLinkedArtAnnotation(annotation, hmo) {
+    const text = this._extractBodyText(annotation);
+    const out = {
+      id: annotation.id,
+      type: 'LinguisticObject',
+      _label: this._truncate(text, 60),
+      content: text || '',
+      // Language: hardcoded Italian for the INTERIM use case.
+      // AAT 300388277 = Italian (Getty AAT canonical IRI; standard LA
+      // example value). If the annotator gains a per-annotation
+      // language field in a later phase, this becomes per-record.
+      language: [{
+        id: 'http://vocab.getty.edu/aat/300388277',
+        type: 'Language',
+        _label: 'Italian',
+      }],
+      about: [{
+        id: hmo.hmoId,
+        type: 'HumanMadeObject',
+        _label: hmo.label,
+      }],
+    };
+
+    // MODE B classification — read modality with every alias the cache
+    // might use (same multi-alias scan as the IIIF export).
+    const modSrc = annotation.modality
+                ?? annotation.property
+                ?? annotation.hasEkphrasticModality
+                ?? annotation['geko:hasEkphrasticModality'];
+    let modKey;
+    if (typeof modSrc === 'string')      modKey = modSrc;
+    else if (modSrc && typeof modSrc === 'object') {
+      modKey = modSrc.id || modSrc['@id'] || null;
+    }
+    const mod = this._normalizeModality(modKey);
+    if (mod) {
+      out.classified_as = [{
+        id: mod.iri,
+        type: 'Type',
+        _label: mod.label,
+      }];
+    }
+    return out;
+  }
+
+  /** Pull a plain-text excerpt from a cached annotation's body. Handles
+   *  the canonical {type, value} shape, the array shape, and the
+   *  occasional missing body (returns empty string). */
+  _extractBodyText(annotation) {
+    const b = annotation.body;
+    if (!b) return '';
+    if (typeof b === 'string') return b;
+    if (Array.isArray(b)) {
+      for (const e of b) {
+        if (typeof e === 'string') return e;
+        if (e && typeof e === 'object' && (e.value || e['rdf:value'])) {
+          return String(e.value || e['rdf:value']);
+        }
+      }
+      return '';
+    }
+    return String(b.value || b['rdf:value'] || '');
+  }
+
+  /** Best-effort human label for a HumanMadeObject derived from its
+   *  canvas IRI (e.g. ".../canvas/p7" → "p7"; ".../some-painting" →
+   *  "some painting"). Pure cosmetics, doesn't affect identity. */
+  _deriveHmoLabel(canvasIri) {
+    const slug = this._canvasSlug(canvasIri);
+    return slug.replace(/[_-]+/g, ' ').trim() || 'Painting';
+  }
+
+  /** Truncate to `n` chars with a trailing ellipsis. Used for _label,
+   *  which Linked Art intends for developers (not end-user display). */
+  _truncate(s, n) {
+    if (!s) return '';
+    if (s.length <= n) return s;
+    return s.slice(0, n - 1) + '…';
   }
 
   /** Best-effort backend URL for the @context reference in the export.

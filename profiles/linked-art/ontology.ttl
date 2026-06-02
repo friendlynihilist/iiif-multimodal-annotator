@@ -1,0 +1,95 @@
+@prefix la:    <https://linked.art/ns/v1/> .
+@prefix crm:   <http://www.cidoc-crm.org/cidoc-crm/> .
+@prefix aat:   <http://vocab.getty.edu/aat/> .
+@prefix geko:  <https://w3id.org/geko/> .
+@prefix dct:   <http://purl.org/dc/terms/> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:   <http://www.w3.org/2002/07/owl#> .
+@prefix skos:  <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+
+# ─────────────────────────────────────────────────────────────────
+# Documentary ontology stub for the Linked Art profile.
+#
+# Linked Art's authoritative vocabulary lives at
+# https://linked.art/ns/v1/linked-art.json (JSON-LD context) and is
+# itself a CIDOC-CRM subset. This file does NOT redefine those terms
+# — it only declares which LA classes / CRM predicates this profile
+# uses, and pins the three GEKO ekphrastic modalities as
+# skos:Concepts to be referenced from `classified_as` (MODE B).
+#
+# Loaded into Fuseki by scripts/bootstrap-fuseki.sh into the named
+# graph <BASE_NS>graphs/ontology/linked-art (Graph Store Protocol).
+# ─────────────────────────────────────────────────────────────────
+
+<https://w3id.org/multimodal-annotator/ns/profiles/linked-art>
+    a owl:Ontology ;
+    dct:title       "Linked Art profile (Multimodal Annotator)"@en ;
+    dct:description "Re-cast of the multimodal annotation core under the Getty Linked Art profile. Modalities expressed via classified_as on the LinguisticObject."@en ;
+    dct:creator     "Carlo Teo Pedretti" ;
+    rdfs:seeAlso    <https://linked.art/model/> .
+
+# ─────────────────────────────────────────────────────────────────
+# Classes consumed from CIDOC-CRM / Linked Art.
+# ─────────────────────────────────────────────────────────────────
+
+crm:E22_Human-Made_Object a owl:Class ;
+    rdfs:label   "Human-Made Object"@en ;
+    rdfs:comment "Physical artwork (painting, print, sculpture). In Linked Art the iconic referent of an ekphrasis is modelled as a HumanMadeObject."@en ;
+    rdfs:seeAlso <https://linked.art/model/object/> .
+
+crm:E36_Visual_Item a owl:Class ;
+    rdfs:label   "Visual Item"@en ;
+    rdfs:comment "The visual content (image, design, depiction) carried by a HumanMadeObject. Distinct from the physical bearer."@en ;
+    rdfs:seeAlso <https://linked.art/model/object/aboutness/> .
+
+crm:E33_Linguistic_Object a owl:Class ;
+    rdfs:label   "Linguistic Object"@en ;
+    rdfs:comment "A unit of language. Used in this profile for the text excerpt of each annotation."@en ;
+    rdfs:seeAlso <https://linked.art/model/document/> .
+
+crm:E73_Information_Object a owl:Class ;
+    rdfs:label   "Information Object / Digital Object"@en ;
+    rdfs:comment "A digital surrogate (image file, IIIF resource). Linked Art's DigitalObject specialisation."@en ;
+    rdfs:seeAlso <https://linked.art/model/digital/> .
+
+# ─────────────────────────────────────────────────────────────────
+# Predicates consumed.
+# ─────────────────────────────────────────────────────────────────
+
+crm:P129_is_about a owl:ObjectProperty ;
+    rdfs:label    "is about (about)"@en ;
+    rdfs:comment  "Linguistic Object → the entity the text is about. Linked Art snake_case: `about`. Used here to connect the annotation text to the HumanMadeObject (painting)."@en ;
+    rdfs:domain   crm:E33_Linguistic_Object ;
+    rdfs:range    crm:E1_CRM_Entity .
+
+crm:P65_shows_visual_item a owl:ObjectProperty ;
+    rdfs:label    "shows visual item (shows)"@en ;
+    rdfs:comment  "Human-Made Object → its Visual Item. Linked Art snake_case: `shows`."@en ;
+    rdfs:domain   crm:E22_Human-Made_Object ;
+    rdfs:range    crm:E36_Visual_Item .
+
+crm:P138_represents a owl:ObjectProperty ;
+    rdfs:label    "digitally shows"@en ;
+    rdfs:comment  "Digital Object → the Visual Item it digitally depicts. Linked Art snake_case: `digitally_shows`."@en .
+
+crm:P2_has_type a owl:ObjectProperty ;
+    rdfs:label    "classified_as"@en ;
+    rdfs:comment  "Linked Art's idiomatic predicate for typing an entity by a controlled-vocabulary term. Used in this profile to attach the ekphrastic modality (denotation / dynamization / integration) to each LinguisticObject — MODE B."@en .
+
+# ─────────────────────────────────────────────────────────────────
+# Modality vocabulary (re-uses the GEKO IRIs as identity).
+# Referenced from classified_as on each LinguisticObject.
+# ─────────────────────────────────────────────────────────────────
+
+geko:denotation a skos:Concept, crm:E55_Type ;
+    skos:prefLabel "Denotation"@en ;
+    rdfs:comment   "Direct referential link from text to image."@en .
+
+geko:dynamization a skos:Concept, crm:E55_Type ;
+    skos:prefLabel "Dynamization"@en ;
+    rdfs:comment   "Temporal / movement-based ekphrastic link."@en .
+
+geko:integration a skos:Concept, crm:E55_Type ;
+    skos:prefLabel "Integration"@en ;
+    rdfs:comment   "Interpretive ekphrastic blend."@en .

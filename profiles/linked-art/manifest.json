@@ -1,0 +1,87 @@
+{
+  "$schema": "https://w3id.org/multimodal-annotator/profile-manifest.schema.json",
+  "id": "linked-art",
+  "name": "Linked Art (Getty)",
+  "description": "Re-models multimodal annotations under the Getty's Linked Art profile (a CIDOC-CRM subset). The three GEKO ekphrastic modalities (denotation / dynamization / integration) are preserved BUT expressed in the LA-idiomatic way: as `classified_as` on the LinguisticObject, NOT as a custom predicate. Demonstrates pluggability — same annotation core, different ontology, same concept re-cast in the target idiom.",
+  "version": "0.1.0",
+  "authors": [
+    { "name": "Carlo Teo Pedretti", "orcid": "https://orcid.org/0000-0002-4115-0078" }
+  ],
+  "license": "CC-BY-4.0",
+
+  "context": "context.jsonld",
+  "ontology": "ontology.ttl",
+
+  "namespaces": {
+    "mma":  "https://w3id.org/multimodal-annotator/ns/",
+    "la":   "https://linked.art/ns/v1/",
+    "crm":  "http://www.cidoc-crm.org/cidoc-crm/",
+    "aat":  "http://vocab.getty.edu/aat/",
+    "geko": "https://w3id.org/geko/"
+  },
+
+  "entityClasses": [
+    {
+      "id": "crm:E22_Human-Made_Object",
+      "label": "Human-Made Object",
+      "description": "Physical artwork (painting, sculpture, print). LA's top class for the iconic referent.",
+      "applicableTo": ["image"]
+    },
+    {
+      "id": "crm:E36_Visual_Item",
+      "label": "Visual Item",
+      "description": "The visual content carried by a Human-Made Object — distinct from the physical object itself.",
+      "applicableTo": ["image"]
+    },
+    {
+      "id": "crm:E33_Linguistic_Object",
+      "label": "Linguistic Object",
+      "description": "A textual content unit — used here for the text excerpt of each annotation.",
+      "applicableTo": ["text"]
+    },
+    {
+      "id": "crm:E73_Information_Object",
+      "label": "Digital Object",
+      "description": "A digital representation (e.g. a IIIF image) of a Visual Item.",
+      "applicableTo": ["image"]
+    }
+  ],
+
+  "linkingProperties": [
+    {
+      "id": "geko:denotation",
+      "label": "Denotation",
+      "description": "Direct referential link — expressed as classified_as on the LinguisticObject in this profile.",
+      "color": "#2196F3",
+      "shortcut": "D",
+      "pattern": "classified_as"
+    },
+    {
+      "id": "geko:dynamization",
+      "label": "Dynamization",
+      "description": "Temporal / movement-based ekphrastic link — expressed as classified_as on the LinguisticObject in this profile.",
+      "color": "#FF5722",
+      "shortcut": "Y",
+      "pattern": "classified_as"
+    },
+    {
+      "id": "geko:integration",
+      "label": "Integration",
+      "description": "Interpretive ekphrastic blend — expressed as classified_as on the LinguisticObject in this profile.",
+      "color": "#9C27B0",
+      "shortcut": "I",
+      "pattern": "classified_as"
+    }
+  ],
+
+  "tagSchemes": [],
+  "annotationMotivations": ["linking", "commenting", "tagging", "transcribing"],
+  "panelTypes": ["text", "image", "facsimile", "sparql"],
+  "annotationLevels": [],
+  "authorityServices": [],
+
+  "notes": {
+    "pattern_for_modality": "MODE B (classified_as on LinguisticObject). Linked Art has no built-in pattern to type a relationship between entities (no AttributeAssignment / Relationship reification recommended), so the modality classifies the text fragment itself. Source: linked.art/model/base — `classified_as` is always a property OF an entity, never of a link.",
+    "region_granularity": "Linked Art has no native xywh/region selector (verified against linked.art/model/digital and linked.art/api/1.0/shared/digital). This profile's export drops per-region xywh and keeps granularity at the canvas / HumanMadeObject level. Region information remains available in the GEKO native export and the IIIF manifest export."
+  }
+}
