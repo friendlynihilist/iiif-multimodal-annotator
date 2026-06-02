@@ -66,10 +66,9 @@ Conference 2026.
 
 ## Author and licence
 
-Carlo Teo Pedretti.
-Bibliotheca Hertziana – Max Planck Institute for Art History (Rome).
-Affiliated with Sapienza Università di Roma; tutoring at Università di
-Bologna.
+Carlo Teo Pedretti, https://orcid.org/0000-0002-4115-0078 - Bibliotheca Hertziana - Max Planck Institute for Art History (Rome); 
+<br>
+Maria Francesca Bocchi, https://orcid.org/0009-0003-0559-0409 - Alma Mater Studiorum - University of Bologna, Italy.
 
 - Code: MIT (see `package.json`).
 - Default `interim-geko` profile bundle (`profiles/interim-geko/`): CC-BY-4.0
