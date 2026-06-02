@@ -4072,6 +4072,16 @@ export class IIIFInterimAnnotator extends HTMLElement {
           stroke-linecap: round;
           stroke-linejoin: round;
         }
+        /* IIIF wordmark inside the Export IIIF button. The official PNG
+           is sized 34×30, but we render it at the same icon footprint as
+           the SVGs (≈14px high) so the toolbar stays uniform. Fixed
+           brand colour by design — no theme tint. */
+        .toolbar button img.iiif-logo {
+          height: 14px;
+          width: auto;
+          display: block;
+          image-rendering: -webkit-optimize-contrast;
+        }
 
         .toolbar button:hover {
           background: var(--mma-surface-hover);
@@ -5124,7 +5134,10 @@ export class IIIFInterimAnnotator extends HTMLElement {
           <span>Export</span>
         </button>
         <button id="export-iiif-btn" title="Export the facsimile IIIF manifest enriched with the linking annotations">
-          <svg viewBox="0 0 24 24"><path d="M3 5h18v14H3z"/><path d="M9 5v14M15 5v14"/></svg>
+          <!-- Official IIIF wordmark (PNG, 34×30, served from public/images).
+               Copied verbatim from iiif.io/assets/uploads/logos so the
+               button visually signals IIIF-conformance. -->
+          <img src="/images/iiif-logo.png" alt="IIIF" class="iiif-logo" />
           <span>Export IIIF</span>
         </button>
         <span class="status" id="status">Ready — Select and confirm text/image, then drag to link</span>
