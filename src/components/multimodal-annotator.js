@@ -7104,6 +7104,13 @@ Annotation Details:
         mlao:    'https://w3id.org/mlao/ontology/',
         icon:    'https://w3id.org/icon/ontology/',
         lrmoo:   'http://iflastandards.info/ns/lrm/lrmoo/',
+        // mma: the tool's own namespace. Annotation IRIs,
+        // AnnotationPage IRIs and HICO InterpretationAct IRIs are
+        // all minted under it (see backend/app/config.py BASE_NS,
+        // backend/app/routes/wap.py:347, contexts/multimodal-context.jsonld:23).
+        // Without this binding, every mma:* id in the exported
+        // manifest is unresolvable for outside consumers.
+        mma:     'https://w3id.org/multimodal-annotator/ns/',
       },
     ];
   }
