@@ -6,9 +6,19 @@ link text spans to image regions under a typed ekphrastic relation. The
 linked structure is stored as W3C Web Annotations in RDF. The ontology stack
 is pluggable per project; the default profile is INTERIM (ekphrasis research).
 
-Stack: Vite + vanilla Web Components (frontend), FastAPI (gateway),
-Apache Jena Fuseki + TDB2 (triple store), OpenSeadragon (IIIF viewer),
-Chart.js (visualisation tab).
+## Stack
+
+The frontend is a small Vite app made of vanilla Web Components — no
+framework dependency, on purpose. OpenSeadragon handles IIIF tile sources;
+Chart.js draws the visualisation tab.
+
+The gateway is a FastAPI service in Python. It converts JSON-LD to RDF on
+write and back on read, and exposes the W3C Web Annotation Protocol plus a
+SPARQL passthrough for the in-browser query panel.
+
+Storage is Apache Jena Fuseki with the TDB2 backend, run from Docker. One
+named graph per annotation; one named graph per profile ontology. See
+`docs/architecture.md` for the rationale.
 
 ## Quick start
 
