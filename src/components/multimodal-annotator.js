@@ -5094,8 +5094,63 @@ export class IIIFInterimAnnotator extends HTMLElement {
           <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
           <span>Export</span>
         </button>
+        <button id="export-iiif-btn" title="Export the facsimile IIIF manifest enriched with the linking annotations">
+          <svg viewBox="0 0 24 24"><path d="M3 5h18v14H3z"/><path d="M9 5v14M15 5v14"/></svg>
+          <span>Export IIIF</span>
+        </button>
         <span class="status" id="status">Ready — Select and confirm text/image, then drag to link</span>
         <span class="copyright">© 2026 Carlo Teo Pedretti</span>
+      </div>
+
+      <!-- IIIF export modal: pick embedded vs referenced, set the
+           base-path that the referenced AnnotationPage IRIs hang off. -->
+      <div class="anchor-modal mma-modal" id="iiif-export-modal" role="dialog" aria-modal="true" aria-labelledby="iiif-export-title" hidden>
+        <div class="mma-modal-header">
+          <span class="mma-modal-title" id="iiif-export-title">Export IIIF manifest</span>
+          <button class="mma-modal-close" id="iiif-export-close" aria-label="Close">
+            <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="mma-modal-body anchor-modal-body">
+          <p class="anchor-modal-subtitle">
+            Fetches the facsimile manifest, normalises to IIIF v3, and
+            attaches one AnnotationPage per canvas grouping the linking
+            annotations under their Ekphrasis.
+          </p>
+
+          <fieldset class="anchor-field" style="border:none;padding:0;margin:0;">
+            <legend class="anchor-field-label" style="padding:0;">Mode</legend>
+            <label style="display:flex;gap:8px;align-items:flex-start;padding:8px 0;cursor:pointer;">
+              <input type="radio" name="iiif-export-mode" value="embedded" id="iiif-export-mode-embedded" checked />
+              <span>
+                <strong style="display:block;font-size:12px;color:var(--mma-text-primary);">Embedded</strong>
+                <small style="font-size:11px;color:var(--mma-text-faint);">Single manifest.json with each AnnotationPage inlined on its canvas. Opens in Mirador/UV with no extra requests.</small>
+              </span>
+            </label>
+            <label style="display:flex;gap:8px;align-items:flex-start;padding:8px 0;cursor:pointer;">
+              <input type="radio" name="iiif-export-mode" value="referenced" id="iiif-export-mode-referenced" />
+              <span>
+                <strong style="display:block;font-size:12px;color:var(--mma-text-primary);">Referenced</strong>
+                <small style="font-size:11px;color:var(--mma-text-faint);">Zip with manifest.json + annotations/&lt;canvas&gt;.json files. AnnotationPage IRIs use the base path below.</small>
+              </span>
+            </label>
+          </fieldset>
+
+          <label class="anchor-field" id="iiif-export-basepath-field">
+            <span class="anchor-field-label">Base path (referenced only)</span>
+            <input id="iiif-export-basepath" class="anchor-field-input"
+                   type="text" autocomplete="off"
+                   value="https://w3id.org/interim/ek-raimondi-kb" />
+            <span class="anchor-field-hint">
+              AnnotationPage IRIs become &lt;base&gt;/annotations/&lt;canvas&gt;.json,
+              Ekphrasis IRIs &lt;base&gt;/ekphrasis/&lt;canvas&gt;. The link
+              target does not need to resolve at export time.
+            </span>
+          </label>
+        </div>
+        <div class="mma-modal-footer">
+          <button class="anchor-create-btn" id="iiif-export-download-btn" type="button">Download</button>
+        </div>
       </div>
 
       <div class="modality-selector" id="modality-selector" role="dialog" aria-modal="true" aria-labelledby="modality-selector-title">
@@ -5553,6 +5608,50 @@ export class IIIFInterimAnnotator extends HTMLElement {
     // (this.exportAnnotations) stays in the class for programmatic
     // callers but is no longer exposed via the toolbar.
     exportBtn.addEventListener('click', () => this.exportAnnotationsGeko());
+
+    // IIIF manifest export — modal with embedded / referenced choice.
+    const iiifBtn = this.shadowRoot.getElementById('export-iiif-btn');
+    const iiifModal = this.shadowRoot.getElementById('iiif-export-modal');
+    const iiifClose = this.shadowRoot.getElementById('iiif-export-close');
+    const iiifDownload = this.shadowRoot.getElementById('iiif-export-download-btn');
+    const iiifBaseInp  = this.shadowRoot.getElementById('iiif-export-basepath');
+    const iiifBaseFld  = this.shadowRoot.getElementById('iiif-export-basepath-field');
+    const setBaseFieldVisibility = () => {
+      const refSel = this.shadowRoot.getElementById('iiif-export-mode-referenced')?.checked;
+      if (iiifBaseFld) iiifBaseFld.style.opacity = refSel ? '1' : '0.4';
+      if (iiifBaseInp) iiifBaseInp.disabled = !refSel;
+    };
+    const closeIiif = () => { if (iiifModal) iiifModal.hidden = true; };
+    iiifBtn?.addEventListener('click', () => {
+      if (!iiifModal) return;
+      setBaseFieldVisibility();
+      iiifModal.hidden = false;
+    });
+    iiifClose?.addEventListener('click', closeIiif);
+    this.shadowRoot.querySelectorAll('input[name="iiif-export-mode"]')
+        .forEach((r) => r.addEventListener('change', setBaseFieldVisibility));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && iiifModal && !iiifModal.hidden) closeIiif();
+    });
+    iiifDownload?.addEventListener('click', async () => {
+      const mode = this.shadowRoot.getElementById('iiif-export-mode-referenced')?.checked
+                 ? 'referenced' : 'embedded';
+      const basePath = (iiifBaseInp?.value || '').trim();
+      iiifDownload.disabled = true;
+      try {
+        if (mode === 'embedded') {
+          await this._exportIiifManifestEmbedded({ basePath });
+        } else {
+          await this._exportIiifManifestReferenced({ basePath });
+        }
+        closeIiif();
+      } catch (err) {
+        console.warn('[MMA IIIF export] failed', err);
+        this.updateStatus(`IIIF export failed: ${err.message || err}`);
+      } finally {
+        iiifDownload.disabled = false;
+      }
+    });
 
     // Modality selector buttons
     modalityButtons.forEach(btn => {
@@ -6978,6 +7077,539 @@ Annotation Details:
     const stripped = facsimileCanvasSource.replace(/[?#].*$/, '');
     const tail = stripped.split('/').filter(Boolean).pop() || 'unknown';
     return tail.replace(/[^A-Za-z0-9_-]/g, '') || 'unknown';
+  }
+
+  // ── IIIF manifest export (embedded + referenced) ──────────────────
+
+  /** JSON-LD @context array used by every emitted IIIF AnnotationPage.
+   *  Includes the W3C Annotation context + the ontology prefixes the
+   *  Ekphrasis metadata relies on. Mirrors the reference example. */
+  _iiifAnnotationPageContext() {
+    return [
+      'http://iiif.io/api/presentation/3/context.json',
+      'http://www.w3.org/ns/anno.jsonld',
+      {
+        as:      'https://www.w3.org/ns/activitystreams#',
+        oa:      'http://www.w3.org/ns/oa#',
+        dc:      'http://purl.org/dc/elements/1.1/',
+        dcterms: 'http://purl.org/dc/terms/',
+        prov:    'http://www.w3.org/ns/prov#',
+        rdf:     'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
+        rdfs:    'http://www.w3.org/2000/01/rdf-schema#',
+        owl:     'http://www.w3.org/2002/07/owl#',
+        xsd:     'http://www.w3.org/2001/XMLSchema#',
+        geko:    'https://w3id.org/geko/#',
+        interim: 'https://w3id.org/interim/ontology/',
+        hico:    'http://purl.org/emmedi/hico/',
+        mlao:    'https://w3id.org/mlao/ontology/',
+        icon:    'https://w3id.org/icon/ontology/',
+        lrmoo:   'http://iflastandards.info/ns/lrm/lrmoo/',
+      },
+    ];
+  }
+
+  /** Derive a short slug from a canvas IRI (e.g. ".../canvas/p7" → "p7").
+   *  Used to compose annotation-page filenames and Ekphrasis ids. */
+  _canvasSlug(canvasIri) {
+    if (!canvasIri) return 'unknown';
+    const m = /\/canvas\/([^\/?#]+)/.exec(canvasIri);
+    if (m) return m[1];
+    const tail = String(canvasIri).split(/[?#]/)[0].split('/').filter(Boolean).pop() || 'unknown';
+    return tail.replace(/[^A-Za-z0-9_-]/g, '') || 'unknown';
+  }
+
+  /** Pluck the painting target source from an annotation. The F1_Work
+   *  target (visual work) carries the canonical iconic referent. */
+  _paintingSource(annotation) {
+    const targets = Array.isArray(annotation.target)
+      ? annotation.target : [annotation.target].filter(Boolean);
+    for (const t of targets) {
+      if (!t || typeof t !== 'object') continue;
+      const tail = (v) => /(?:^|[#\/:])F1_Work$/.test(String(v));
+      const tArr = Array.isArray(t.type) ? t.type : [t.type, t.class];
+      if (tArr.some(tail) && t.source) return t.source;
+    }
+    return null;
+  }
+
+  /** Normalise a cached annotation into a W3C / IIIF v3 conformant
+   *  Annotation object suitable for an AnnotationPage `items` entry.
+   *
+   *  Fix-ups vs. the reference example bugs:
+   *    - SINGLE `target` field (array of SpecificResource). No
+   *      duplicate `oa:hasTarget` array, no string shorthand.
+   *    - `geko:hasEkphrasticModality` rewritten with z-spelling and
+   *      absolute IRIs.
+   *    - source strings (not nested `{id: ...}` objects) — keeps the
+   *      payload close to W3C canonical form. */
+  _toIiifAnnotation(annotation, opts = {}) {
+    const ekphrasisIri = opts.ekphrasisIri || '';
+    // Build the single target array, normalising sources to strings
+    // and FragmentSelectors to the canonical W3C form.
+    const rawTargets = Array.isArray(annotation.target)
+      ? annotation.target
+      : [annotation.target].filter(Boolean);
+    const targets = [];
+    for (const t of rawTargets) {
+      if (!t || typeof t !== 'object') continue;
+      const source = typeof t.source === 'string' ? t.source
+                   : (t.source?.id || t.source?.['@id'] || null);
+      if (!source) continue;
+      const selRaw = t.selector || {};
+      const selValue = selRaw.value || selRaw['rdf:value'] || '';
+      const sel = selValue ? {
+        type: 'FragmentSelector',
+        conformsTo: 'http://www.w3.org/TR/media-frags/',
+        value: String(selValue),
+      } : null;
+      targets.push({
+        type: 'SpecificResource',
+        source,
+        ...(sel ? { selector: sel } : {}),
+      });
+      // F1_Work / F2_Expression discrimination is declared at the
+      // AnnotationPage level via geko:hasTextualReferent /
+      // geko:hasIconicReferent, not per-target — matches the
+      // reference example's W3C shape.
+    }
+
+    // Body cleanup: strip mma-internal `class`; let _cleanGekoBody
+    // drop any residual lrmoo:F2_Expression from the `type` field.
+    let cleanBody;
+    if (annotation.body) {
+      cleanBody = this._cleanGekoBody(annotation.body);
+      delete cleanBody.class;
+    }
+
+    const out = {
+      id: String(annotation.id || ''),
+      type: 'Annotation',
+      motivation: annotation.motivation || 'commenting',
+      body: cleanBody,
+      target: targets,
+    };
+
+    // Carry the timestamps + creator if present in the cache.
+    if (annotation.created)   out.created   = annotation.created;
+    if (annotation.modified)  out.modified  = annotation.modified;
+    if (annotation.creator)   out.creator   = annotation.creator;
+
+    // ── Ekphrastic modality ──────────────────────────────────────
+    // The JSON-LD context defines THREE aliases on the same predicate
+    // (`property`, `modality`, `hasEkphrasticModality`) plus the
+    // full prefixed form. The backend's compactor can pick any of
+    // them; we scan all four.
+    const modSrc = annotation.modality
+                ?? annotation.property
+                ?? annotation.hasEkphrasticModality
+                ?? annotation['geko:hasEkphrasticModality'];
+    let modKey;
+    if (typeof modSrc === 'string')      modKey = modSrc;
+    else if (modSrc && typeof modSrc === 'object') {
+      modKey = modSrc.id || modSrc['@id'] || null;
+    }
+    const mod = this._normalizeModality(modKey);
+    if (mod) {
+      out['geko:hasEkphrasticModality'] = { id: mod.iri };
+    }
+
+    // ── MLAO anchor ──────────────────────────────────────────────
+    // Two shapes are possible:
+    //   (A) Client-stamped during the same session (flat object with
+    //       isAnchoredTo, isAnchoredToLabel, isCustomEntity,
+    //       entityClass, hasConceptualLevel).
+    //   (B) Backend-returned after a reload — pyld frames the bnode
+    //       and we get a nested object that uses the context aliases
+    //       (isAnchoredTo, hasConceptualLevel) — OR the prefixed
+    //       form (mlao:isAnchoredTo, mlao:hasConceptualLevel).
+    // Handle both. Also accept the field under `mlao:hasAnchor` for
+    // the case where the compactor preferred the prefixed alias.
+    const a = annotation.hasAnchor ?? annotation['mlao:hasAnchor'];
+    if (a) {
+      const anchorOut = this._toIiifAnchorBlock(a);
+      if (anchorOut) out['mlao:hasAnchor'] = anchorOut;
+    }
+
+    // ── PROV / HICO provenance ───────────────────────────────────
+    // Pass through whatever shape the cache holds — the InterpretationAct
+    // is a self-contained sub-graph that should already be embedded
+    // by the backend's framer. Try both context-alias names.
+    const prov = annotation.wasGeneratedBy ?? annotation['prov:wasGeneratedBy'];
+    if (prov) out['prov:wasGeneratedBy'] = prov;
+
+    // Ekphrasis grouping pointer.
+    if (ekphrasisIri) out['as:partOf'] = { id: ekphrasisIri };
+
+    // Drop undefined keys (motivation default already covered).
+    if (out.body === undefined) delete out.body;
+    return out;
+  }
+
+  /** Build the IIIF / W3C "mlao:hasAnchor" sub-object from whatever
+   *  shape the cache holds. Returns null if the input doesn't carry
+   *  at least an isAnchoredTo IRI. */
+  _toIiifAnchorBlock(a) {
+    if (a == null) return null;
+    // String case: bnode reference (worst case — no nested fields
+    // available). Emit it as-is so downstream RDF consumers can
+    // still trace the link, even though there's nothing semantic.
+    if (typeof a === 'string') return { type: 'mlao:Anchor', id: a };
+    if (typeof a !== 'object' || Array.isArray(a)) return null;
+
+    // Read isAnchoredTo with every alias the context could have used.
+    const anchored = a.isAnchoredTo ?? a['mlao:isAnchoredTo'];
+    const level    = a.hasConceptualLevel ?? a['mlao:hasConceptualLevel'];
+    const isCustom = !!a.isCustomEntity;
+
+    const out = { type: 'mlao:Anchor' };
+
+    if (anchored != null) {
+      if (typeof anchored === 'string') {
+        // Wikidata IRI / CURIE / bnode — emit as id-object.
+        if (isCustom) {
+          // Client-stamped custom entity: also carry class + label
+          // from sibling fields on `a`.
+          out['mlao:isAnchoredTo'] = {
+            id:   this._expandPrefix(anchored),
+            type: this._expandPrefix(a.entityClass || 'crm:E1_Entity'),
+            ...(a.isAnchoredToLabel ? { 'rdfs:label': a.isAnchoredToLabel } : {}),
+          };
+        } else {
+          out['mlao:isAnchoredTo'] = { id: this._expandPrefix(anchored) };
+        }
+      } else if (typeof anchored === 'object') {
+        // Already an embedded resource (backend framing or
+        // client-stamped object).
+        const id = anchored.id || anchored['@id'];
+        const t  = anchored.type || anchored['@type'];
+        const lbl = anchored['rdfs:label'] || anchored.label;
+        const flat = id ? {
+          id: this._expandPrefix(id),
+          ...(t   ? { type: this._expandPrefix(typeof t === 'string' ? t : t[0]) } : {}),
+          ...(lbl ? { 'rdfs:label': typeof lbl === 'string' ? lbl
+                              : (lbl?.en?.[0] || Object.values(lbl)[0]?.[0] || String(lbl)) } : {}),
+        } : null;
+        if (flat) out['mlao:isAnchoredTo'] = flat;
+      }
+    }
+
+    if (level != null) {
+      const levelIri = typeof level === 'string'
+        ? level
+        : (level.id || level['@id']);
+      if (levelIri) {
+        out['mlao:hasConceptualLevel'] = { id: this._expandPrefix(levelIri) };
+      }
+    }
+
+    // Need at least one anchor coordinate to be useful.
+    if (!out['mlao:isAnchoredTo'] && !out['mlao:hasConceptualLevel']) {
+      return null;
+    }
+    return out;
+  }
+
+  /** Build a single AnnotationPage for one facsimile canvas. Returns
+   *  the full object (used directly in embedded mode, written out as
+   *  a standalone file in referenced mode). */
+  _buildIiifAnnotationPage(canvasIri, annotations, opts = {}) {
+    const basePath   = (opts.basePath || '').replace(/\/$/, '');
+    const slug       = this._canvasSlug(canvasIri);
+    const ekphrasisIri = `${basePath}/ekphrasis/${slug}`;
+    const pageIri      = `${basePath}/annotations/${slug}`;
+
+    // Per-annotation normalisation.
+    const items = annotations.map((a) =>
+      this._toIiifAnnotation(a, { ekphrasisIri }));
+
+    // prov:hadMember — ALWAYS an array, even with one member. The
+    // reference thesis example had it as a string singleton; fixed
+    // here.
+    const memberIris = items.map((a) => ({ id: a.id }));
+
+    // Iconic referent: distinct painting sources on this group.
+    const iconicSources = new Set();
+    for (const a of annotations) {
+      const src = this._paintingSource(a);
+      if (src) iconicSources.add(src);
+    }
+    const iconicReferents = [...iconicSources].map((src) => ({
+      id: src,
+      type: 'lrmoo:F1_Work',
+    }));
+
+    const page = {
+      '@context': this._iiifAnnotationPageContext(),
+      id: pageIri,
+      type: 'AnnotationPage',
+      label: { en: [`Ekphrasis annotations for canvas ${slug}`] },
+      'as:partOf': {
+        id: ekphrasisIri,
+        type: 'https://w3id.org/geko/#Ekphrasis',
+      },
+      'geko:hasTextualReferent': {
+        id: `${ekphrasisIri}/textual_ref`,
+        type: 'lrmoo:F2_Expression',
+        ...(opts.textualReferentLabel
+            ? { 'rdfs:label': opts.textualReferentLabel } : {}),
+      },
+      ...(iconicReferents.length
+          ? { 'geko:hasIconicReferent': iconicReferents.length === 1
+                ? iconicReferents[0]
+                : iconicReferents }
+          : {}),
+      'prov:hadMember': memberIris,
+      items,
+    };
+    return page;
+  }
+
+  /** Walk every cached annotation, group by facsimile canvas source,
+   *  return a Map<canvasIri, annotations[]>. */
+  _groupAnnotationsByFacsimileCanvas() {
+    const annotations = (this.store ? this.store.all() : null) || this.annotations;
+    const groups = new Map();
+    for (const a of annotations) {
+      const src = this._facsimileSource(a);
+      if (!src) continue;          // skip text-only / non-linking
+      if (!groups.has(src)) groups.set(src, []);
+      groups.get(src).push(a);
+    }
+    return groups;
+  }
+
+  /** Best-effort IIIF v2 → v3 manifest conversion. Pass-through for
+   *  manifests that already declare the v3 context. Conservative —
+   *  produces a v3 shape Mirador/UV accept; falls back to the
+   *  original v2 fields under their old keys when in doubt so we
+   *  never drop information silently. */
+  _iiifConvertV2ToV3(manifest) {
+    if (!manifest || typeof manifest !== 'object') return manifest;
+    const ctx = manifest['@context'];
+    const ctxStr = Array.isArray(ctx) ? ctx.join('|') : String(ctx || '');
+    if (ctxStr.includes('presentation/3/context')) return manifest;   // already v3
+    // From here on, treat as v2 (sequences/canvases/images shape).
+    const wrapLabel = (v) => {
+      if (v == null) return undefined;
+      if (typeof v === 'string') return { none: [v] };
+      if (Array.isArray(v)) return { none: v.map(String) };
+      if (typeof v === 'object' && (v['@value'] || v.value)) {
+        const lang = v['@language'] || v.language || 'none';
+        return { [lang]: [String(v['@value'] || v.value)] };
+      }
+      return v;
+    };
+    const stripScType = (t) => {
+      if (typeof t !== 'string') return t;
+      return t.replace(/^sc:/, '');   // sc:Canvas → Canvas
+    };
+    const v3Canvas = (c) => {
+      const im = c?.images?.[0]?.resource || {};
+      const svc = im.service || {};
+      const svcId = svc['@id'] || svc.id;
+      const svcProfile = svc.profile || svc['@profile'];
+      const out = {
+        id:    c['@id'] || c.id,
+        type:  'Canvas',
+        label: wrapLabel(c.label) || { none: [String(c['@id'] || c.id)] },
+        height: c.height,
+        width:  c.width,
+      };
+      if (c.thumbnail) {
+        const tArr = Array.isArray(c.thumbnail) ? c.thumbnail : [c.thumbnail];
+        out.thumbnail = tArr.map((th) => ({
+          id:     th['@id'] || th.id,
+          type:   'Image',
+          format: th.format || 'image/jpeg',
+          ...(th.width  ? { width:  th.width  } : {}),
+          ...(th.height ? { height: th.height } : {}),
+        }));
+      }
+      if (c.metadata) out.metadata = c.metadata;
+      // Build the painting AnnotationPage from the v2 images[0].
+      if (im['@id'] || im.id) {
+        out.items = [{
+          id: `${(c['@id'] || c.id || '').replace(/\/$/, '')}/page-painting`,
+          type: 'AnnotationPage',
+          items: [{
+            id: `${(c['@id'] || c.id || '').replace(/\/$/, '')}/annotation-painting`,
+            type: 'Annotation',
+            motivation: 'painting',
+            body: {
+              id:     im['@id'] || im.id,
+              type:   'Image',
+              format: im.format || 'image/jpeg',
+              ...(im.width  ? { width:  im.width  } : {}),
+              ...(im.height ? { height: im.height } : {}),
+              ...(svcId ? {
+                service: [{
+                  id: svcId,
+                  type: 'ImageService2',
+                  ...(svcProfile ? { profile: String(svcProfile).replace(/^.*level/, 'level') } : {}),
+                }],
+              } : {}),
+            },
+            target: c['@id'] || c.id,
+          }],
+        }];
+      } else {
+        out.items = [];
+      }
+      return out;
+    };
+
+    const out = {
+      '@context': 'http://iiif.io/api/presentation/3/context.json',
+      id:    manifest['@id'] || manifest.id,
+      type:  stripScType(manifest['@type']) || 'Manifest',
+      label: wrapLabel(manifest.label) || { none: ['Untitled manifest'] },
+    };
+    if (manifest.description)  out.summary           = wrapLabel(manifest.description);
+    if (manifest.attribution)  out.requiredStatement = {
+      label: { en: ['Attribution'] },
+      value: wrapLabel(manifest.attribution),
+    };
+    if (manifest.metadata)     out.metadata          = manifest.metadata;
+    if (manifest.thumbnail) {
+      const tArr = Array.isArray(manifest.thumbnail) ? manifest.thumbnail : [manifest.thumbnail];
+      out.thumbnail = tArr.map((th) => ({
+        id:     th['@id'] || th.id,
+        type:   'Image',
+        format: th.format || 'image/jpeg',
+      }));
+    }
+    const canvases = manifest.sequences?.[0]?.canvases || [];
+    out.items = canvases.map(v3Canvas);
+    return out;
+  }
+
+  /** Common builder used by both export modes. Resolves the facsimile
+   *  manifest from the dominant F2_Expression target source, fetches
+   *  + v3-normalises it, and returns:
+   *    { manifest, manifestUrl, byCanvas: Map<canvasIri, page> }
+   *  where `page` is the full AnnotationPage object for that canvas. */
+  async _buildIiifExportData(opts = {}) {
+    const groups = this._groupAnnotationsByFacsimileCanvas();
+    if (groups.size === 0) {
+      throw new Error('No linking annotations with a facsimile target — nothing to export.');
+    }
+    // Resolve the facsimile manifest URL. All canvases in the groups
+    // should share one (we operate on a single manuscript per session);
+    // if more than one manifest is referenced, take the dominant.
+    const manifestCount = new Map();
+    for (const canvasIri of groups.keys()) {
+      const m = this._manifestUrlFromCanvasIri(canvasIri);
+      if (m) manifestCount.set(m, (manifestCount.get(m) || 0) + 1);
+    }
+    const manifestUrl = [...manifestCount.entries()]
+      .sort((a, b) => b[1] - a[1])[0]?.[0];
+    if (!manifestUrl) {
+      throw new Error('Could not derive a facsimile manifest URL from the annotation targets.');
+    }
+    let raw = await this._fetchIiifManifest(manifestUrl);
+    if (!raw) {
+      throw new Error(`Failed to fetch facsimile manifest: ${manifestUrl}`);
+    }
+    const manifest = this._iiifConvertV2ToV3(raw);
+
+    // Derive a textual referent label from the manifest if available.
+    const labelObj = manifest.label || {};
+    const labelStr = Object.values(labelObj)[0]?.[0] || '';
+
+    // Build per-canvas AnnotationPage objects.
+    const byCanvas = new Map();
+    for (const [canvasIri, annotations] of groups) {
+      const page = this._buildIiifAnnotationPage(canvasIri, annotations, {
+        basePath:              opts.basePath,
+        textualReferentLabel:  labelStr || undefined,
+      });
+      byCanvas.set(canvasIri, page);
+    }
+    return { manifest, manifestUrl, byCanvas };
+  }
+
+  /** EMBEDDED mode: single manifest.json with every AnnotationPage
+   *  inlined on its canvas under `canvas.annotations`. */
+  async _exportIiifManifestEmbedded({ basePath } = {}) {
+    const { manifest, byCanvas } = await this._buildIiifExportData({ basePath });
+    // Walk the manifest canvases, attach annotations[] where we have
+    // a page for that canvas. The lookup is keyed by canvas IRI.
+    for (const c of (manifest.items || [])) {
+      const cid = c.id;
+      const page = byCanvas.get(cid);
+      if (!page) continue;
+      c.annotations = [page];
+    }
+    const blob = new Blob([JSON.stringify(manifest, null, 2)],
+                          { type: 'application/json' });
+    this._downloadBlob(blob, `manifest-iiif-embedded-${Date.now()}.json`);
+    this.updateStatus(
+      `Exported IIIF manifest (embedded) — ${byCanvas.size} canvas` +
+      `${byCanvas.size === 1 ? '' : 'es'} with annotations.`
+    );
+  }
+
+  /** REFERENCED mode: zip with `manifest.json` (annotations carry refs
+   *  only, NO items) + `annotations/{canvasSlug}.json` per canvas with
+   *  the full AnnotationPage. */
+  async _exportIiifManifestReferenced({ basePath } = {}) {
+    if (!basePath) {
+      throw new Error('Referenced export requires a base path.');
+    }
+    const JSZip = await this._loadJSZip();
+    const { manifest, byCanvas } = await this._buildIiifExportData({ basePath });
+
+    // Mutate the manifest: each canvas with annotations gets a
+    // reference (no `items`); the AnnotationPage with items goes
+    // out to its own file under annotations/.
+    const annotationFiles = new Map();   // slug → page JSON
+    for (const c of (manifest.items || [])) {
+      const cid = c.id;
+      const page = byCanvas.get(cid);
+      if (!page) continue;
+      const slug = this._canvasSlug(cid);
+      const refUrl = `${basePath.replace(/\/$/, '')}/annotations/${slug}.json`;
+      c.annotations = [{ id: refUrl, type: 'AnnotationPage' }];   // NO items
+      const fullPage = { ...page, id: refUrl };
+      annotationFiles.set(slug, fullPage);
+    }
+
+    const zip = new JSZip();
+    zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+    for (const [slug, page] of annotationFiles) {
+      zip.file(`annotations/${slug}.json`, JSON.stringify(page, null, 2));
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    this._downloadBlob(blob, `manifest-iiif-referenced-${Date.now()}.zip`);
+    this.updateStatus(
+      `Exported IIIF manifest (referenced) — ${annotationFiles.size} ` +
+      `annotation file${annotationFiles.size === 1 ? '' : 's'} + manifest.json zipped.`
+    );
+  }
+
+  /** Lazy-load JSZip from jsDelivr. Cached on window.JSZip. */
+  _loadJSZip() {
+    if (window.JSZip) return Promise.resolve(window.JSZip);
+    if (this._jszipPromise) return this._jszipPromise;
+    this._jszipPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+      s.async = true;
+      s.onload  = () => resolve(window.JSZip);
+      s.onerror = () => reject(new Error('Failed to load JSZip from CDN'));
+      document.head.appendChild(s);
+    });
+    return this._jszipPromise;
+  }
+
+  /** Trigger a browser download of `blob` under `filename`. */
+  _downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href     = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   /** Convert a raw cached annotation into its GEKO v2 export shape:
